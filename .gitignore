@@ -1,0 +1,175 @@
+# =============================================================================
+# AutoAgentHire — Git Ignore Configuration
+# =============================================================================
+
+# ── Python & Bytecode ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+/lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ── Virtual Environments ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.virtualenv/
+
+# ── IDEs, Editors & OS Files ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── Environment Variables & Secrets ──────────────────────────────────────────
+# Ignore all real environment files across root, backend, frontend & subdirs
+.env
+.env.*
+.env*.local
+*.env
+*.env.*
+*.local
+
+# Allow example and template environment files to be committed
+!.env.example
+!*.env.example
+!.env*.example
+!**/.env.example
+!**/.env*.example
+
+# ── Sensitive Keys, Credentials & Certificates ────────────────────────────────
+*.pem
+*.key
+*.pfx
+*.p12
+*.pkcs12
+*.crt
+*.der
+credentials.json
+token.json
+*.credentials
+*credentials*.json
+*credential*.json
+service_account*.json
+service-account*.json
+client_secret*.json
+fly-secrets.sh
+
+# ── Database Files & Local SQLite ─────────────────────────────────────────────
+# Ignore database binaries and write-ahead logs (DO NOT ignore migration scripts)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlitedb
+
+# ── Database Migrations (PRESERVED) ───────────────────────────────────────────
+# Alembic and SQL migrations MUST be tracked in version control.
+# Do NOT ignore migrations/versions/*.py or backend/database/migrations/!
+
+# ── Logs & Debug Outputs ──────────────────────────────────────────────────────
+logs/
+backend/logs/
+*.log
+data/logs/*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Testing, Coverage & Linters ───────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# ── Vector DB & Local Model Caches ────────────────────────────────────────────
+vector_db/data/*
+chroma_db/
+*.chroma
+
+# ── Runtime Data & User Uploads ───────────────────────────────────────────────
+data/
+uploads/
+backend/uploads/
+
+# ── Node.js & React Frontend Build ────────────────────────────────────────────
+node_modules/
+**/node_modules/
+.pnp
+.pnp.js
+frontend/dist/
+frontend/build/
+.vite/
+
+# ── Docker Overrides & Process IDs ────────────────────────────────────────────
+*.pid
+docker-compose.override.yml
+
+# ── Playwright, Selenium & Screenshots ────────────────────────────────────────
+screenshots/
+data/screenshots/
+*.screenshot.png
+browser_profile/
+backend/browser_profile/
+*.png
+*.jpg
+*.jpeg
+# Preserve documentation and UI web assets
+!docs/**
+!frontend/public/**
+!frontend/src/assets/**
+
+# ── Jupyter Notebooks ─────────────────────────────────────────────────────────
+.ipynb_checkpoints
+*.ipynb
+
+# ── Temporary & Cache Files ───────────────────────────────────────────────────
+*.tmp
+*.temp
+*.bak
+*.bak2
+/tmp/
+.cache/
+
+# ── Task Queues (Celery) ──────────────────────────────────────────────────────
+celerybeat-schedule
+celerybeat.pid

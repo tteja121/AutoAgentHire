@@ -1,0 +1,101 @@
+# .dockerignore — exclude files from Docker build context
+# Keeps image small and prevents secrets leaking into the image
+
+# ── Secrets & environment ──────────────────────────────────────────────────────
+.env
+.env.*
+.env*.local
+*.env
+*.env.*
+*.local
+!.env.example
+!*.env.example
+!.env*.example
+!**/.env.example
+!**/.env*.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.pkcs12
+*.crt
+*.der
+credentials.json
+token.json
+*.credentials
+*credentials*.json
+*credential*.json
+service_account*.json
+service-account*.json
+client_secret*.json
+fly-secrets.sh
+secrets/
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.virtualenv/
+
+# ── Data & uploads (mounted as volume at runtime) ─────────────────────────────
+data/
+uploads/
+vector_db/
+browser_profile/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# ── Frontend (not needed in backend image) ────────────────────────────────────
+frontend/
+scripts/
+docs/
+
+# ── Git & IDE ─────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitignore.bak
+.dockerignore
+.dockerignore.bak
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Docker files (not needed inside container) ─────────────────────────────────
+docker/
+docker-compose*.yml
+
+# ── Test & dev files ───────────────────────────────────────────────────────────
+tests/
+test_*.py
+*_test.py
+pytest.ini
+.coverage
+htmlcov/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Large binary/cache files ──────────────────────────────────────────────────
+*.pkl
+*.faiss
+*.bin
+node_modules/
