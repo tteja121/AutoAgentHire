@@ -210,7 +210,7 @@ async def run_agent(
             raise HTTPException(status_code=404, detail=f"Resume file not found: {request.resume_file_path}")
         
         # Get or create user
-        user_email = request.linkedin_email or settings.LINKEDIN_EMAIL or os.getenv("LINKEDIN_EMAIL", "default@example.com")
+        user_email = request.linkedin_email or os.getenv("LINKEDIN_EMAIL", "") or os.getenv("LINKEDIN_EMAIL", "default@example.com")
         user = crud.get_user_by_email(db, user_email)
         if not user:
             user = crud.create_user(db, email=user_email, linkedin_email=user_email)

@@ -11,8 +11,7 @@ POST /auth/google   – Sign in / register with a Google ID token
 
 import os
 import uuid as _uuid
-import requests as http_requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse
@@ -27,6 +26,7 @@ from backend.auth.dependencies import get_current_user
 from backend.database.connection import get_db
 from backend.database.crud import UserRepository
 from backend.database.models_complete import User, AuditLog
+from backend.config import settings
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
@@ -53,7 +53,7 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1)
     full_name: str | None = None
-    role: str = Field(default="recruiter", description="recruiter or authorizer")
+    role: str = Field(default="recruiter", description="recruiter or candidate")
     company_name: str | None = None
     company_logo_url: str | None = None
     phone: str | None = None
@@ -63,6 +63,18 @@ class SignupRequest(BaseModel):
 class SignupResponse(BaseModel):
     message: str
     custom_user_id: str | None = None
+    status: str = "success"
+    email: str | None = None
+    requires_otp: bool = False
+
+
+class VerifyOtpRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=4, max_length=10)
+
+
+class ResendOtpRequest(BaseModel):
+    email: EmailStr
 
 
 class LoginRequest(BaseModel):
@@ -168,16 +180,9 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
         if phone_err:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=phone_err)
 
-    # 4. Duplicate check
-    existing = UserRepository.get_by_email(db, email=body.email)
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User already exists. Please login.",
-        )
+    clean_email = body.email.strip().lower()
+    clean_name = (body.full_name or "").strip()
 
-    # 5. Hash + store
-    hashed = hash_password(body.password)
     # Disallow signing up as Authorizer
     user_role = (body.role or "candidate").lower()
     if user_role == "authorizer":
@@ -186,12 +191,81 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
             detail="Authorizer accounts cannot be created publicly. Credentials are pre-configured.",
         )
 
-    # For recruiters, ensure official email, company name, and assign unique User ID
+    # 5. Hash password
+    hashed = hash_password(body.password)
+
+    # 6. For Candidates/Clients: Generate 6-digit OTP and send email verification
+    if user_role not in ("recruiter", "candidate"):
+        user_role = "candidate"
+
+    if user_role == "candidate":
+        import random
+        otp_code = f"{random.randint(100000, 999999)}"
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(minutes=15)
+
+        existing = UserRepository.get_by_email(db, email=clean_email)
+        if existing:
+            if getattr(existing, "is_verified", False):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="An account with this email already exists. Please log in.",
+                )
+            # Existing unverified registration: refresh password and OTP
+            existing.hashed_password = hashed
+            if clean_name:
+                existing.full_name = clean_name
+            existing.email_verification_code = otp_code
+            existing.email_verification_expires_at = expires_at
+            db.commit()
+        else:
+            try:
+                UserRepository.create(
+                    db,
+                    email=clean_email,
+                    hashed_password=hashed,
+                    full_name=clean_name,
+                    role="candidate",
+                    is_verified=False,
+                    email_verification_code=otp_code,
+                    email_verification_expires_at=expires_at,
+                    approval_status="approved",
+                    phone=body.phone,
+                    location=body.location,
+                )
+            except Exception as exc:
+                import logging as _logging
+                _logging.getLogger(__name__).error("DB insert failed during client signup: %s", exc)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create user account. Please try again.",
+                )
+
+        from backend.services.email_service import send_signup_verification_code
+        email_sent = send_signup_verification_code(clean_email, clean_name, otp_code)
+        import logging as _logging
+        _logging.getLogger(__name__).info("Client signup OTP %s dispatched to %s (sent=%s)", otp_code, clean_email, email_sent)
+
+        return SignupResponse(
+            status="pending_verification",
+            message=f"A 6-digit verification code has been dispatched to {clean_email}.",
+            email=clean_email,
+            requires_otp=True,
+        )
+
+    # 7. For recruiters: ensure official email, company name, and assign unique User ID
+    existing = UserRepository.get_by_email(db, email=clean_email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User already exists. Please login.",
+        )
+
     approval_status = "approved"
     assigned_user_id = None
     if user_role == "recruiter":
-        email_domain = body.email.split("@")[-1].lower()
-        if is_personal_email_domain(body.email):
+        email_domain = clean_email.split("@")[-1].lower()
+        if is_personal_email_domain(clean_email):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Recruiters must register with an official company email address. Personal email domains (@{email_domain}) are not permitted. Please use your corporate or organization email.",
@@ -213,15 +287,12 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
         if not assigned_user_id:
             assigned_user_id = f"REC-{random.randint(10000, 99999)}"
 
-    if user_role not in ("recruiter", "candidate"):
-        user_role = "candidate"
-
     try:
         UserRepository.create(
             db,
-            email=body.email,
+            email=clean_email,
             hashed_password=hashed,
-            full_name=body.full_name or "",
+            full_name=clean_name,
             role=user_role,
             company_name=body.company_name,
             company_logo_url=body.company_logo_url,
@@ -239,13 +310,116 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
         )
 
     import logging as _logging
-    _logging.getLogger(__name__).info("User profile saved successfully: %s (role: %s, approval: %s, user_id: %s)", body.email, user_role, approval_status, assigned_user_id)
+    _logging.getLogger(__name__).info("User profile saved successfully: %s (role: %s, approval: %s, user_id: %s)", clean_email, user_role, approval_status, assigned_user_id)
     if user_role == "recruiter":
         return SignupResponse(
             message=f"Recruiter registration request submitted! Your assigned Recruiter User ID is {assigned_user_id}. Once an Authorizer grants permission, you can sign in using your official email or User ID.",
-            custom_user_id=assigned_user_id
+            custom_user_id=assigned_user_id,
+            email=clean_email,
+            requires_otp=False,
         )
-    return SignupResponse(message="User created successfully")
+    return SignupResponse(message="User created successfully", email=clean_email, requires_otp=False)
+
+
+# ── Verify OTP ───────────────────────────────────────────────────────────────
+
+@router.post(
+    "/verify-otp",
+    response_model=LoginResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify 6-digit OTP code to activate Client account",
+)
+def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
+    clean_email = body.email.strip().lower()
+    code = body.code.strip()
+
+    user = UserRepository.get_by_email(db, clean_email)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No registration found for this email.")
+
+    if getattr(user, "is_verified", False):
+        access_token = create_access_token(data={"sub": user.email, "role": user.role, "id": user.id})
+        return LoginResponse(
+            access_token=access_token,
+            token_type="bearer",
+            role=user.role,
+            full_name=user.full_name,
+            custom_user_id=user.custom_user_id,
+            approval_status=user.approval_status or "approved",
+        )
+
+    saved_code = getattr(user, "email_verification_code", None)
+    expires_at = getattr(user, "email_verification_expires_at", None)
+
+    now = datetime.now(timezone.utc)
+    if expires_at:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if now > expires_at:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Verification code has expired. Please click 'Resend Code'.",
+            )
+
+    if not saved_code or saved_code != code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid 6-digit verification code. Please check your email and try again.",
+        )
+
+    user.is_verified = True
+    user.email_verified_at = now
+    user.email_verification_code = None
+    user.email_verification_expires_at = None
+    user.is_active = True
+    user.approval_status = "approved"
+    db.commit()
+    db.refresh(user)
+
+    access_token = create_access_token(data={"sub": user.email, "role": user.role, "id": user.id})
+    return LoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        role=user.role,
+        full_name=user.full_name,
+        custom_user_id=user.custom_user_id,
+        approval_status="approved",
+    )
+
+
+# ── Resend OTP ──────────────────────────────────────────────────────────────
+
+@router.post(
+    "/resend-otp",
+    status_code=status.HTTP_200_OK,
+    summary="Resend 6-digit OTP verification code",
+)
+def resend_signup_otp(body: ResendOtpRequest, db: Session = Depends(get_db)):
+    clean_email = body.email.strip().lower()
+    user = UserRepository.get_by_email(db, clean_email)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No registration found for this email.")
+
+    if getattr(user, "is_verified", False):
+        return {"status": "already_verified", "message": "Email is already verified. Please sign in."}
+
+    import random
+    otp_code = f"{random.randint(100000, 999999)}"
+    now = datetime.now(timezone.utc)
+    user.email_verification_code = otp_code
+    user.email_verification_expires_at = now + timedelta(minutes=15)
+    db.commit()
+
+    from backend.services.email_service import send_signup_verification_code
+    email_sent = send_signup_verification_code(clean_email, user.full_name, otp_code)
+    import logging as _logging
+    _logging.getLogger(__name__).info("Resent OTP %s dispatched to %s (sent=%s)", otp_code, clean_email, email_sent)
+
+    return {
+        "status": "success",
+        "message": f"A new 6-digit verification code has been dispatched to {clean_email}.",
+    }
+
 
 
 # ── Resolve User ID ──────────────────────────────────────────────────────────
@@ -303,7 +477,7 @@ def resolve_user_id(body: ResolveUserIdRequest, db: Session = Depends(get_db)):
 
     return ResolveUserIdResponse(
         status="success",
-        email=user.email,
+        email=str(user.email),
         role=user_role,
         full_name=getattr(user, "full_name", None),
         company_name=getattr(user, "company_name", None),
@@ -410,7 +584,9 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
     # Sync pre-configured credentials if password matches official seed
     if is_demo_recruiter and user is not None and body.password == "Re@123":
-        user.hashed_password = hash_password("Re@123")  # type: ignore
+        if not verify_password("Re@123", str(user.hashed_password)):
+            user.hashed_password = hash_password("Re@123")  # type: ignore
+            db.commit()
         user.role = "recruiter"  # type: ignore
         user.approval_status = "approved"  # type: ignore
         if not getattr(user, "custom_user_id", None):
@@ -418,7 +594,9 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         db.commit()
 
     if is_authorizer and user is not None and body.password == "Author@123":
-        user.hashed_password = hash_password("Author@123")  # type: ignore
+        if not verify_password("Author@123", str(user.hashed_password)):
+            user.hashed_password = hash_password("Author@123")  # type: ignore
+            db.commit()
         user.role = "authorizer"  # type: ignore
         user.approval_status = "approved"  # type: ignore
         if not getattr(user, "custom_user_id", None):
@@ -455,6 +633,13 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Your Recruiter registration request was rejected by the Authorizer. Please contact administration.",
             )
+
+    # 6. Verification Check: Clients with pending verification code must verify
+    if user_role == "candidate" and getattr(user, "is_verified", None) is False and getattr(user, "email_verification_code", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your email is not verified yet. Please enter the 6-digit verification code sent to your inbox.",
+        )
 
 
     # Update last_login timestamp and write audit log
@@ -506,8 +691,9 @@ def get_me(current_user: User = Depends(get_current_user)):
 @router.get("/callback", summary="Redirect OAuth callback to frontend SPA")
 def auth_callback_redirect(request: Request):
     """Fallback handler: Redirects any direct backend hits on /auth/callback to the Vite SPA."""
+    base = getattr(settings, 'REACT_APP_API_URL', 'http://localhost:8080').rstrip('/')
     query_str = str(request.query_params)
-    target = f"http://localhost:8080/auth/callback?{query_str}" if query_str else "http://localhost:8080/auth/callback"
+    target = f"{base}/auth/callback?{query_str}" if query_str else f"{base}/auth/callback"
     return RedirectResponse(url=target)
 
 
@@ -519,7 +705,7 @@ def auth_callback_redirect(request: Request):
     status_code=status.HTTP_200_OK,
     summary="Sign in or register with Google",
 )
-def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
+async def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
     """Verify a Google OAuth2 access token, then sign in or auto-register the user.
 
     Flow
@@ -531,11 +717,27 @@ def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
     """
     # 1. Verify token by calling Google's userinfo endpoint
     try:
-        resp = http_requests.get(
-            "https://www.googleapis.com/oauth2/v3/userinfo",
-            headers={"Authorization": f"Bearer {body.access_token}"},
-            timeout=10,
-        )
+        import httpx as _httpx
+        async with _httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {body.access_token}"},
+                timeout=10,
+            )
+    except ImportError:
+        # httpx not installed — fall back to synchronous requests
+        import requests as _requests
+        try:
+            resp = _requests.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {body.access_token}"},
+                timeout=10,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not reach Google servers: {exc}",
+            )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -636,17 +838,17 @@ async def change_password(
         )
 
     new_hashed = hash_password(body.new_password)
-    current_user.hashed_password = new_hashed
+    setattr(current_user, "hashed_password", new_hashed)
     db.commit()
 
     # Log audit entry
     try:
         audit = AuditLog(
             action="CHANGE_PASSWORD",
-            performed_by_id=int(current_user.id),
+            user_id=int(current_user.id),
             performed_by_email=str(current_user.email),
             target_type="user",
-            target_id=int(current_user.id),
+            target_id=str(current_user.id),
             details=f"User {current_user.email} successfully updated their password."
         )
         db.add(audit)

@@ -367,9 +367,8 @@ async def start_automation_v2(
         uploads_dir = Path("uploads")
         uploads_dir.mkdir(parents=True, exist_ok=True)
         resume_path = uploads_dir / f"{session_id}_{resume.filename}"
-        with open(resume_path, "wb") as f:
-            content = await resume.read()
-            f.write(content)
+        content = await resume.read()
+        await asyncio.to_thread(lambda: resume_path.write_bytes(content))
         resume_path = str(resume_path)
     
     # Parse resume to extract skills and experience

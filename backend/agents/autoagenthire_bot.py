@@ -62,13 +62,13 @@ class AutoAgentHireBot:
         api_key = os.getenv('GEMINI_API_KEY')
         if api_key and not api_key.startswith('your_'):
             genai.configure(api_key=api_key)  # type: ignore
-            self.ai_model = genai.GenerativeModel('gemini-2.0-flash-exp')  # type: ignore
+            self.ai_model = genai.GenerativeModel('gemini-2.0-flash')  # type: ignore
         else:
             self.ai_model = None
 
     async def _run_sync(self, func, *args, **kwargs) -> Any:
         """Run a sync function in the thread executor."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         if kwargs:
             return await loop.run_in_executor(_playwright_executor, partial(func, *args, **kwargs))
         return await loop.run_in_executor(_playwright_executor, partial(func, *args))

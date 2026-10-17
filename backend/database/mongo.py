@@ -7,7 +7,7 @@ import os
 import time
 import logging
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from pymongo import MongoClient, ASCENDING, DESCENDING, TEXT
 from pymongo.database import Database
 from pymongo.collection import Collection
@@ -15,10 +15,7 @@ from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MONGO_URI = os.getenv(
-    "MONGODB_URI",
-    "mongodb+srv://hyraiauto_db_user:eYxzOK1AH9kuNW9E@cluster0.amc4psk.mongodb.net/autoagenthire?retryWrites=true&w=majority"
-)
+DEFAULT_MONGO_URI = os.getenv("MONGODB_URI", "")
 DEFAULT_DB_NAME = os.getenv("MONGODB_DB_NAME", "autoagenthire")
 
 
@@ -36,6 +33,10 @@ class MongoDBManager:
         """Initialize connection pool to MongoDB Atlas."""
         if self._connected and self._client:
             return True
+
+        if not self.uri:
+            logger.warning("MONGODB_URI not set — MongoDB disabled")
+            return False
 
         try:
             logger.info("Connecting to MongoDB Atlas at %s...", self.uri.split('@')[-1] if '@' in self.uri else 'local')
@@ -184,7 +185,7 @@ class MongoDBManager:
                     "default_skills": u.default_skills,
                     "default_experience_level": u.default_experience_level,
                     "created_at": u.created_at.isoformat() if u.created_at else None,
-                    "updated_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
                 self.db["users"].update_one({"email": u.email}, {"$set": doc}, upsert=True)
                 counts["users"] += 1
@@ -209,7 +210,7 @@ class MongoDBManager:
                     "recruiting_process": j.recruiting_process,
                     "status": j.status,
                     "created_at": j.created_at.isoformat() if j.created_at else None,
-                    "updated_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
                 self.db["job_postings"].update_one({"id": j.id}, {"$set": doc}, upsert=True)
                 counts["job_postings"] += 1
@@ -234,7 +235,7 @@ class MongoDBManager:
                     "match_score": a.match_score,
                     "email_status": a.email_status,
                     "created_at": a.created_at.isoformat() if a.created_at else None,
-                    "updated_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
                 self.db["job_candidate_applications"].update_one({"id": a.id}, {"$set": doc}, upsert=True)
                 counts["job_candidate_applications"] += 1

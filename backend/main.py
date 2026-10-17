@@ -171,7 +171,6 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Include routers
 app.include_router(auth_router)
-app.include_router(recruiter_router)
 app.include_router(recruiter_router, prefix="/api")
 app.include_router(api_router)
 app.include_router(linkedin_jobs_router)
@@ -183,6 +182,13 @@ app.include_router(autoagenthire_router)
 app.include_router(mongo_router)
 if v2_router is not None:
     app.include_router(v2_router)  # V2 API for frontend
+
+# Mount static files directory for uploaded resumes and documents
+from fastapi.staticfiles import StaticFiles
+import os as _os
+uploads_path = _os.path.join(_os.getcwd(), "uploads")
+_os.makedirs(uploads_path, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_path), name="uploads")
 
 
 # Health check endpoint
@@ -200,7 +206,7 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    mongo_status = mongo_manager.ping()
+    mongo_status = await asyncio.to_thread(mongo_manager.ping)
     return {
         "status": "healthy",
         "database": "connected",
@@ -219,14 +225,6 @@ Those duplicates caused contract confusion (JSON vs multipart) and route precede
 issues. The canonical endpoints live in `backend.routes.api_routes` (mounted above)
 and in `backend.api.autoagenthire` via `register_autoagenthire_routes(app)`.
 """
-
-
-# Include AutoAgentHire routes
-try:
-    from backend.api.autoagenthire import register_autoagenthire_routes
-    register_autoagenthire_routes(app)
-except Exception as e:
-    print(f"⚠️  Could not load AutoAgentHire routes: {e}")
 
 # TODO: Include routers
 # app.include_router(routes.jobs_router, prefix="/jobs", tags=["Jobs"])

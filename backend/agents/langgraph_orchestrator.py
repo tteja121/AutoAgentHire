@@ -13,6 +13,7 @@ Benefits of LangGraph:
 - Checkpointing support for long-running workflows
 - Clean separation of concerns
 """
+import asyncio
 from typing import Dict, Any, Optional
 from langgraph.graph import StateGraph, END
 from datetime import datetime
@@ -92,8 +93,8 @@ class LangGraphOrchestrator:
         initial_state["workflow_status"] = WorkflowStatus.RUNNING
         
         try:
-            # Run the graph (synchronous for now, async support coming)
-            final_state_raw = self.app.invoke(initial_state)
+            # Run the graph wrapped in asyncio.to_thread to avoid blocking the event loop
+            final_state_raw = await asyncio.to_thread(self.app.invoke, initial_state)
             
             # Convert to AgentState (it might come back as plain dict)
             final_state: AgentState = final_state_raw  # type: ignore

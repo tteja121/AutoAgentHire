@@ -26,7 +26,10 @@ def get_mongo_status():
         col_names = mongo_manager.db.list_collection_names()
         counts = {}
         for col_name in col_names:
-            counts[col_name] = mongo_manager.db[col_name].count_documents({})
+            try:
+                counts[col_name] = mongo_manager.db[col_name].count_documents({}, maxTimeMS=2000)
+            except Exception:
+                counts[col_name] = -1
 
         return {
             "status": "healthy",

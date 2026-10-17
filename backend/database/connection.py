@@ -28,6 +28,8 @@ _echo = os.getenv('DEBUG', 'False').lower() == 'true'
 def _make_engine(url: str):
     """Create a SQLAlchemy engine for the given URL."""
     if url.startswith('sqlite'):
+        # StaticPool: all requests share ONE connection - safe for SQLite single-process only.
+        # For multi-process or production, switch to NullPool + DATABASE_URL=postgresql://...
         return create_engine(
             url,
             connect_args={"check_same_thread": False},
@@ -118,8 +120,8 @@ _COLUMN_MIGRATIONS = [
 def _run_migrations():
     """Apply any missing column additions to existing tables."""
     is_sqlite = DATABASE_URL.startswith("sqlite")
-    with engine.connect() as conn:
-        for table, column, definition in _COLUMN_MIGRATIONS:
+    for table, column, definition in _COLUMN_MIGRATIONS:
+        with engine.begin() as conn:
             try:
                 if is_sqlite:
                     # SQLite: check information_schema equivalent
@@ -132,15 +134,11 @@ def _run_migrations():
                     conn.execute(text(
                         f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}"
                     ))
-                conn.commit()
                 print(f"[DB] Migration: added column {table}.{column}")
             except Exception as exc:
-                conn.rollback()
                 msg = str(exc).lower()
                 # "already exists" or "duplicate column" — safe to ignore
-                if "already exists" in msg or "duplicate column" in msg:
-                    pass
-                else:
+                if "already exists" not in msg and "duplicate column" not in msg:
                     print(f"[DB] Migration warning ({table}.{column}): {str(exc).splitlines()[0]}")
 
 

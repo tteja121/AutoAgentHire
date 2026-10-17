@@ -25,6 +25,18 @@ except ImportError:
     logger.warning("python-docx not installed - DOCX parsing disabled")
 
 
+# Module-level singleton for MultiAIService to avoid re-creating on every parse call
+_ai_service: Optional['object'] = None
+
+def _get_ai_service():
+    """Return (or lazily create) the module-level MultiAIService singleton."""
+    global _ai_service
+    if _ai_service is None:
+        from backend.llm.multi_ai_service import MultiAIService
+        _ai_service = MultiAIService()
+    return _ai_service
+
+
 class ResumeParser:
     """
     Parser for extracting information from resumes.
@@ -123,7 +135,7 @@ class ResumeParser:
             from backend.llm.multi_ai_service import MultiAIService
             
             # Use AI to extract structured data
-            ai_service = MultiAIService()
+            ai_service = _get_ai_service()
             
             prompt = f"""
 Extract structured information from the following resume text. Return ONLY a valid JSON object with these fields:

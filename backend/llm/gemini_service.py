@@ -44,7 +44,8 @@ class GeminiService:
             temperature: Temperature for generation (0-1)
         """
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        configured_model = model_name or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        self.model_name = configured_model
         self.temperature = temperature
         
         if not self.api_key or self.api_key in ("your-gemini-api-key", "your_gemini_api_key_here", ""):
@@ -53,7 +54,11 @@ class GeminiService:
         else:
             try:
                 genai.configure(api_key=self.api_key)  # type: ignore
-                self.model = genai.GenerativeModel(self.model_name)  # type: ignore
+                try:
+                    self.model = genai.GenerativeModel(self.model_name)  # type: ignore
+                except Exception:
+                    self.model = genai.GenerativeModel("gemini-1.5-flash")  # type: ignore
+                    self.model_name = "gemini-1.5-flash"
                 logger.info(f"Google Gemini service initialized with model: {self.model_name}")
             except Exception as e:
                 logger.warning(f"Failed to initialize Google Gemini client: {e}")

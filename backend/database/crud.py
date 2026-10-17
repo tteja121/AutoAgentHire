@@ -581,3 +581,89 @@ class AnalyticsRepository:
             .order_by(desc(AnalyticsEvent.timestamp))\
             .limit(limit)\
             .all()
+
+
+# ── Standalone CRUD helpers called by agent_routes.py ──────────────────────
+
+def get_user_by_email(db: Session, email: str):
+    """Delegate to UserRepository."""
+    return UserRepository.get_by_email(db, email=email)
+
+
+def create_user(db: Session, email: str, hashed_password: str = "", full_name: str = "", role: str = "job_seeker", **kwargs):
+    """Delegate to UserRepository."""
+    if not hashed_password:
+        import uuid as _uuid
+        from backend.auth.password import hash_password
+        hashed_password = hash_password(_uuid.uuid4().hex)
+    return UserRepository.create(db, email=email, hashed_password=hashed_password, full_name=full_name, role=role, **kwargs)
+
+
+def create_agent_run(db: Session, data: dict):
+    """Create a new AgentRun record."""
+    run = AgentRun(**data)
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def get_agent_run(db: Session, run_id: str):
+    """Get an AgentRun by its UUID string."""
+    return db.query(AgentRun).filter(AgentRun.uuid == run_id).first()
+
+
+def update_agent_run(db: Session, run_id: str, data: dict):
+    """Update an AgentRun by UUID."""
+    run = get_agent_run(db, run_id)
+    if run is None:
+        return None
+    for key, value in data.items():
+        setattr(run, key, value)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def get_user_agent_runs(db: Session, user_id: int, limit: int = 50):
+    """Get AgentRuns for a user."""
+    return AgentRunRepository.get_for_user(db, user_id=user_id, limit=limit)
+
+
+def create_application(db: Session, data: dict):
+    """Create a new Application record."""
+    app = Application(**data)
+    db.add(app)
+    db.commit()
+    db.refresh(app)
+    return app
+
+
+def get_agent_run_applications(db: Session, run_id: str):
+    """Get Applications linked to a specific AgentRun by UUID."""
+    run = get_agent_run(db, run_id)
+    if run is None:
+        return []
+    return db.query(Application).filter(Application.agent_run_id == run.id).all()
+
+
+def deactivate_other_resumes(db: Session, user_id: int, resume_id: int):
+    """Set is_active=False for all resumes of user except the given resume_id."""
+    db.query(Resume).filter(
+        Resume.user_id == user_id,
+        Resume.id != resume_id
+    ).update({"is_active": False}, synchronize_session="fetch")
+    db.commit()
+
+
+def create_resume(db: Session, user_id: int, resume_dict: dict):
+    """Create a Resume record for a user."""
+    return ResumeRepository.create(
+        db,
+        user_id=user_id,
+        filename=resume_dict.get("filename", "resume"),
+        file_path=resume_dict.get("file_path", ""),
+        file_size_bytes=resume_dict.get("file_size_bytes", 0),
+        file_type=resume_dict.get("file_type", "pdf"),
+        **{k: v for k, v in resume_dict.items() if k not in ("filename", "file_path", "file_size_bytes", "file_type")},
+    )

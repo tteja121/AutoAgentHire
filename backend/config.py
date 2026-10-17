@@ -78,10 +78,10 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # MongoDB Atlas
-    MONGODB_URI: str = "mongodb+srv://hyraiauto_db_user:eYxzOK1AH9kuNW9E@cluster0.amc4psk.mongodb.net/autoagenthire?retryWrites=true&w=majority"
+    MONGODB_URI: str = Field(default="", description="Set MONGODB_URI in .env")
     MONGODB_DB_NAME: str = "autoagenthire"
-    MONGODB_USERNAME: Optional[str] = "hyraiauto_db_user"
-    MONGODB_PASSWORD: Optional[str] = "eYxzOK1AH9kuNW9E"
+    MONGODB_USERNAME: Optional[str] = None
+    MONGODB_PASSWORD: Optional[str] = None
 
     @field_validator("SECRET_KEY", mode="before")
     @classmethod
@@ -138,6 +138,15 @@ class Settings(BaseSettings):
     PROXY_URL: Optional[str] = None
     
     # Email
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM_EMAIL: Optional[str] = None
+    SMTP_FROM_NAME: str = "AutoAgentHire Platform"
+    SMTP_USE_TLS: bool = True
+    SMTP_ENABLED: bool = True
+    RESEND_API_KEY: Optional[str] = None
     SENDGRID_API_KEY: Optional[str] = None
     SENDGRID_FROM_EMAIL: Optional[str] = None
     NOTIFICATION_EMAIL: Optional[str] = None
@@ -179,9 +188,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> List[str]:
         """Parse CORS_ORIGINS string to list."""
-        if isinstance(self.CORS_ORIGINS, list):
-            return self.CORS_ORIGINS
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        if not hasattr(self, '_cors_origins_list_cache'):
+            object.__setattr__(self, '_cors_origins_list_cache',
+                [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()])
+        return self._cors_origins_list_cache  # type: ignore
 
     # File Upload
     MAX_UPLOAD_SIZE_MB: int = 10
@@ -190,9 +200,10 @@ class Settings(BaseSettings):
     @property
     def allowed_extensions_list(self) -> List[str]:
         """Parse ALLOWED_RESUME_EXTENSIONS string to list."""
-        if isinstance(self.ALLOWED_RESUME_EXTENSIONS, list):
-            return self.ALLOWED_RESUME_EXTENSIONS
-        return [ext.strip() for ext in self.ALLOWED_RESUME_EXTENSIONS.split(",") if ext.strip()]
+        if not hasattr(self, '_allowed_extensions_list_cache'):
+            object.__setattr__(self, '_allowed_extensions_list_cache',
+                [e.strip() for e in self.ALLOWED_RESUME_EXTENSIONS.split(",") if e.strip()])
+        return self._allowed_extensions_list_cache  # type: ignore
 
     # Optional fields present in .env but not strictly required
     LLAMA_MODEL_PATH: Optional[str] = None

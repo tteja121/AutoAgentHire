@@ -62,18 +62,7 @@ def get_current_user(
 
     user = UserRepository.get_by_email(db, email=email)
     if user is None:
-        # Auto-provision local user record for Supabase OAuth users (defaulting safely to candidate role)
-        from backend.auth.passwords import hash_password
-        import uuid as _uuid
-        user = UserRepository.create(
-            db,
-            email=email,
-            hashed_password=hash_password(_uuid.uuid4().hex),
-            full_name=full_name or email.split("@")[0],
-            role="candidate",
-            is_active=True,
-            is_verified=True,
-        )
+        raise credentials_exception
 
     if not user.is_active:  # type: ignore
         raise credentials_exception

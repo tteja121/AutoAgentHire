@@ -6,12 +6,13 @@ from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
+import asyncio
 import logging
 import os
 import json
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.database.connection import get_db
 from backend.database.crud import UserRepository, ResumeRepository
@@ -112,6 +113,7 @@ class ApplicationState:
 
 
 # Global state instance
+# NOTE: app_state is in-process only. Use Redis or DB for multi-worker deployments.
 app_state = ApplicationState()
 
 
@@ -174,9 +176,8 @@ async def run_agent(
         if file and file.filename:
             safe_prefix = re.sub(r'[^a-zA-Z0-9_-]', '_', effective_email)
             resume_path = os.path.join(upload_dir, f"{safe_prefix}_{file.filename}")
-            with open(resume_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
+            content = await file.read()
+            await asyncio.to_thread(lambda: Path(resume_path).write_bytes(content))
             logger.info(f"Resume saved for agent run: {resume_path}")
         else:
             # Fallback to existing resume file if available
@@ -333,7 +334,7 @@ async def upload_resume(
         clean_email = user_email.strip().lower()
         target_user = UserRepository.get_by_email(db, email=clean_email)
         if not target_user:
-            from backend.auth.passwords import hash_password
+            from backend.auth.password import hash_password
             import uuid as _uuid
             target_user = UserRepository.create(
                 db,
@@ -363,8 +364,7 @@ async def upload_resume(
         if not content:
             raise HTTPException(400, "Uploaded file is empty")
 
-        with open(file_path, "wb") as f:
-            f.write(content)
+        await asyncio.to_thread(lambda: Path(file_path).write_bytes(content))
 
         file_size = len(content)
         file_ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
@@ -426,15 +426,15 @@ async def upload_resume(
                 target_user.full_name = contact.get("name")
                 user_updates = True
             if contact.get("phone"):
-                target_user.phone = contact.get("phone")
+                setattr(target_user, "phone", contact.get("phone"))
                 user_updates = True
             if contact.get("location"):
-                target_user.location = contact.get("location")
+                setattr(target_user, "location", contact.get("location"))
                 user_updates = True
             if experience and isinstance(experience, list) and len(experience) > 0:
                 first_exp = experience[0]
                 if isinstance(first_exp, dict) and first_exp.get("title"):
-                    target_user.default_experience_level = f"{first_exp.get('title')} ({len(experience)} roles)"
+                    setattr(target_user, "default_experience_level", f"{first_exp.get('title')} ({len(experience)} roles)")
                     user_updates = True
             if user_updates:
                 db.commit()
@@ -505,7 +505,8 @@ def get_user_resumes(
     if not target_user:
         return {"resumes": [], "total": 0}
 
-    resumes = ResumeRepository.get_all_for_user(db, target_user.id)
+    user_id_int = int(target_user.id)
+    resumes = ResumeRepository.get_all_for_user(db, user_id_int)
     return {
         "resumes": [
             {
@@ -514,7 +515,7 @@ def get_user_resumes(
                 "filename": r.filename,
                 "file_type": r.file_type,
                 "file_size_bytes": r.file_size_bytes,
-                "url": r.storage_url or f"/api/recruiter/files/{os.path.basename(r.file_path)}",
+                "url": r.storage_url or f"/api/recruiter/files/{os.path.basename(str(r.file_path or ''))}",
                 "is_active": r.is_active,
                 "skills": r.skills or [],
                 "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -565,7 +566,7 @@ def get_user_activities(
             "title": f"Applied to {job.title if job else 'Position'}",
             "description": f"Application submitted to {job.company_name if job else 'Company'} with status: {app.status.capitalize()}",
             "status": app.status,
-            "timestamp": app.created_at.isoformat() if app.created_at else datetime.utcnow().isoformat(),
+            "timestamp": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
             "meta": {
                 "job_id": app.job_posting_id,
                 "job_title": job.title if job else "Position",
@@ -577,19 +578,21 @@ def get_user_activities(
 
     # 2. Resumes uploaded
     if target_user:
-        resumes = ResumeRepository.get_all_for_user(db, target_user.id)
+        u_id = int(target_user.id)
+        resumes = ResumeRepository.get_all_for_user(db, u_id)
         for r in resumes[:15]:
+            skills_list = list(r.skills or [])
             activities.append({
                 "id": f"resume_{r.id}",
                 "type": "resume_upload",
                 "title": f"Uploaded Resume: {r.filename}",
-                "description": f"Extracted {len(r.skills or [])} skills and updated candidate profile",
+                "description": f"Extracted {len(skills_list)} skills and updated candidate profile",
                 "status": "completed",
-                "timestamp": r.created_at.isoformat() if r.created_at else datetime.utcnow().isoformat(),
+                "timestamp": r.created_at.isoformat() if r.created_at else datetime.now(timezone.utc).isoformat(),
                 "meta": {
                     "resume_id": r.id,
                     "filename": r.filename,
-                    "skills_count": len(r.skills or []),
+                    "skills_count": len(skills_list),
                 }
             })
 
@@ -607,7 +610,7 @@ def get_user_activities(
                     "title": log.action.replace("_", " ").title(),
                     "description": f"Event logged for {log.target_type or 'profile'}",
                     "status": "completed",
-                    "timestamp": log.timestamp.isoformat() if log.timestamp else datetime.utcnow().isoformat(),
+                    "timestamp": log.timestamp.isoformat() if log.timestamp else datetime.now(timezone.utc).isoformat(),
                     "meta": log.details or {},
                 })
 
@@ -692,16 +695,16 @@ def request_email_verification(
     from backend.services.email_service import send_email_change_verification_code
 
     code = f"{random.randint(100000, 999999)}"
-    current_user.pending_email = clean_email
-    current_user.email_verification_code = code
-    current_user.email_verification_expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    setattr(current_user, "pending_email", clean_email)
+    setattr(current_user, "email_verification_code", code)
+    setattr(current_user, "email_verification_expires_at", datetime.now(timezone.utc) + timedelta(minutes=15))
     db.commit()
 
     # Dispatch official email
     sent = send_email_change_verification_code(
         to_email=clean_email,
-        user_name=current_user.full_name or "Official User",
-        user_role=current_user.role,
+        user_name=str(current_user.full_name or "Official User"),
+        user_role=str(current_user.role or "candidate"),
         verification_code=code,
         expires_in_minutes=15,
     )
@@ -768,12 +771,12 @@ def verify_email_code(
 
     # Officially update the email!
     old_email = current_user.email
-    current_user.email = clean_email
-    current_user.pending_email = None
-    current_user.email_verification_code = None
-    current_user.email_verification_expires_at = None
-    current_user.email_verified_at = datetime.now(timezone.utc)
-    current_user.is_verified = True
+    setattr(current_user, "email", clean_email)
+    setattr(current_user, "pending_email", None)
+    setattr(current_user, "email_verification_code", None)
+    setattr(current_user, "email_verification_expires_at", None)
+    setattr(current_user, "email_verified_at", datetime.now(timezone.utc))
+    setattr(current_user, "is_verified", True)
     db.commit()
     db.refresh(current_user)
 
@@ -812,7 +815,7 @@ def update_user_profile(
         clean_email = body.email.strip().lower()
         target_user = UserRepository.get_by_email(db, clean_email)
         if not target_user:
-            from backend.auth.passwords import hash_password
+            from backend.auth.password import hash_password
             import uuid as _uuid
             target_user = UserRepository.create(
                 db,
@@ -872,10 +875,10 @@ def update_user_profile(
                         if datetime.now(timezone.utc) > exp:
                             raise HTTPException(status_code=400, detail="Verification code has expired. Please request a fresh code.")
                     # Verified!
-                    target_user.pending_email = None
-                    target_user.email_verification_code = None
-                    target_user.email_verification_expires_at = None
-                    target_user.email_verified_at = datetime.now(timezone.utc)
+                    setattr(target_user, "pending_email", None)
+                    setattr(target_user, "email_verification_code", None)
+                    setattr(target_user, "email_verification_expires_at", None)
+                    setattr(target_user, "email_verified_at", datetime.now(timezone.utc))
                     update_fields["email"] = new_email
                 else:
                     raise HTTPException(
@@ -1281,8 +1284,8 @@ async def get_applications(
                 "url": f"/candidate/jobs",
                 "job_url": f"/candidate/jobs",
                 "status": app.status or "applied",
-                "applied_date": app.created_at.isoformat() if app.created_at else datetime.utcnow().isoformat(),
-                "applied_at": app.created_at.isoformat() if app.created_at else datetime.utcnow().isoformat(),
+                "applied_date": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
+                "applied_at": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
                 "match_score": score_pct,
                 "candidate_name": app.candidate_name,
                 "candidate_email": app.candidate_email,
@@ -1303,7 +1306,7 @@ async def get_applications(
         try:
             bot_db_apps = db.query(Application).limit(limit).all()
             for b_app in bot_db_apps:
-                raw_score = b_app.match_score or 90
+                raw_score = float(b_app.match_score) if b_app.match_score is not None else 90.0
                 score_pct = int(raw_score * 100) if raw_score <= 1.0 else int(raw_score)
                 formatted_apps.append({
                     "id": b_app.id + 10000,
@@ -1314,8 +1317,8 @@ async def get_applications(
                     "url": b_app.job_url or "/candidate/jobs",
                     "job_url": b_app.job_url or "/candidate/jobs",
                     "status": b_app.status or "applied",
-                    "applied_date": datetime.utcnow().isoformat(),
-                    "applied_at": datetime.utcnow().isoformat(),
+                    "applied_date": datetime.now(timezone.utc).isoformat(),
+                    "applied_at": datetime.now(timezone.utc).isoformat(),
                     "match_score": score_pct,
                 })
         except Exception as b_err:
@@ -1344,9 +1347,13 @@ async def get_applications(
                         "url": res.get("url", "/candidate/jobs"),
                         "job_url": res.get("url", "/candidate/jobs"),
                         "status": res.get("status", "applied"),
-                        "applied_date": res.get("timestamp", datetime.utcnow().isoformat()),
-                        "applied_at": res.get("timestamp", datetime.utcnow().isoformat()),
+                        "applied_date": res.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                        "applied_at": res.get("timestamp", datetime.now(timezone.utc).isoformat()),
                         "match_score": res.get("match_score", 90),
+                        "interview_meeting_link": res.get("interview_meeting_link"),
+                        "interview_scheduled_at": res.get("interview_scheduled_at"),
+                        "interview_round": res.get("interview_round"),
+                        "interview_notes": res.get("interview_notes"),
                     })
             except Exception as j_err:
                 logger.warning(f"Failed to read applications.json: {j_err}")
