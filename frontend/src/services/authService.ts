@@ -250,8 +250,7 @@ export const authService = {
     // 2. Official Email Validation for Recruiter / Authorizer
     if (targetRole && ['recruiter', 'authorizer'].includes(targetRole)) {
       const isDemoAuth = emailToAuth.toLowerCase() === 'author@auto.in';
-      const isDemoRec = emailToAuth.toLowerCase() === 're@auto.in';
-      if (!isDemoAuth && !isDemoRec && isPersonalEmail(emailToAuth)) {
+      if (!isDemoAuth && isPersonalEmail(emailToAuth)) {
         const domain = emailToAuth.split('@')[1];
         throw new Error(
           `${targetRole.charAt(0).toUpperCase() + targetRole.slice(1)}s must use an official company email address. Personal email domains (@${domain}) are not permitted.`

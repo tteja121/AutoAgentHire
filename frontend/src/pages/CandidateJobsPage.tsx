@@ -125,9 +125,14 @@ export default function CandidateJobsPage() {
     const handleProfileUpdate = () => {
       autoFillCandidateProfile();
     };
+    const handleJobUpdate = () => {
+      loadCandidateJobs();
+    };
     window.addEventListener('candidateProfileUpdated', handleProfileUpdate);
+    window.addEventListener('jobPostingsUpdated', handleJobUpdate);
     return () => {
       window.removeEventListener('candidateProfileUpdated', handleProfileUpdate);
+      window.removeEventListener('jobPostingsUpdated', handleJobUpdate);
     };
   }, []);
 
@@ -164,27 +169,35 @@ export default function CandidateJobsPage() {
   const loadCandidateJobs = async () => {
     setLoading(true);
     try {
-      const activeJobs = await jobsService.getJobs();
-      if (activeJobs && activeJobs.length > 0) {
-        const mapped: JobPosting[] = activeJobs.map(j => ({
-          id: Number(j.id) || 1,
-          uuid: String(j.id),
-          title: j.title,
-          company_name: j.companies?.name || "AutoAgentHire Partner",
-          location: j.location || "Remote",
-          description: j.description || "",
-          vacancies: 1,
-          salary_description: j.salary_min && j.salary_max ? `$${j.salary_min.toLocaleString()} - $${j.salary_max.toLocaleString()}` : "Competitive",
-          job_type: j.employment_type || "Full-time",
-          start_date_pt: new Date().toISOString(),
-          final_date_pt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          timezone: "UTC",
-          status: j.status,
-        }));
-        setJobs(mapped);
+      // Fetch directly from candidate jobs API so all recruiter parameters, dates, and logos are preserved
+      const resp = await apiClient.get(API_ENDPOINTS.recruiter.candidateJobs);
+      const apiJobs = resp.data || [];
+      if (Array.isArray(apiJobs) && apiJobs.length > 0) {
+        setJobs(apiJobs);
       } else {
-        const resp = await apiClient.get(API_ENDPOINTS.recruiter.candidateJobs);
-        setJobs(resp.data || []);
+        const activeJobs = await jobsService.getJobs();
+        if (activeJobs && activeJobs.length > 0) {
+          const mapped: JobPosting[] = activeJobs.map(j => ({
+            id: Number(j.id) || 1,
+            uuid: String(j.id),
+            title: j.title,
+            company_name: j.companies?.name || j.company_name || "AutoAgentHire Partner",
+            company_logo_url: j.company_logo_url,
+            organization_symbol: j.organization_symbol,
+            location: j.location || "Remote",
+            description: j.description || "",
+            vacancies: j.vacancies || 1,
+            salary_description: j.salary_description || "Competitive",
+            job_type: j.job_type || j.employment_type || "Full-time",
+            start_date_pt: new Date().toISOString(),
+            final_date_pt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            timezone: "Asia/Kolkata (IST)",
+            status: j.status,
+          }));
+          setJobs(mapped);
+        } else {
+          setJobs([]);
+        }
       }
     } catch (err) {
       console.error("Failed to load candidate jobs:", err);
@@ -417,15 +430,15 @@ export default function CandidateJobsPage() {
                       </div>
                     </div>
 
-                    {/* Pacific Time Application Window Banner */}
+                    {/* Indian Standard Time (IST) Application Window Banner */}
                     <div className="p-2.5 rounded-lg bg-white/5 border border-white/5 text-[11px] space-y-1">
                       <div className="flex justify-between text-muted-foreground">
-                        <span>Window Start:</span>
-                        <span className="font-mono text-foreground">{job.start_date_pt}</span>
+                        <span>Window Start (IST):</span>
+                        <span className="font-mono text-foreground">{job.start_date_pt?.replace("T", " ")}</span>
                       </div>
                       <div className="flex justify-between text-muted-foreground">
-                        <span>Final Deadline:</span>
-                        <span className="font-mono text-foreground">{job.final_date_pt}</span>
+                        <span>Final Deadline (IST):</span>
+                        <span className="font-mono text-foreground">{job.final_date_pt?.replace("T", " ")}</span>
                       </div>
                     </div>
 
@@ -739,19 +752,19 @@ export default function CandidateJobsPage() {
                 </p>
               </div>
 
-              {/* Pacific Time Application Window & Schedule */}
+              {/* Application Window & Schedule */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3.5 rounded-xl bg-white/5 border border-white/5 text-xs">
                 <div>
                   <span className="text-muted-foreground block text-[11px] mb-0.5">Application Window Start:</span>
-                  <span className="font-mono text-foreground font-semibold">{viewingRoleDetailsJob.start_date_pt} (PT)</span>
+                  <span className="font-mono text-foreground font-semibold">{viewingRoleDetailsJob.start_date_pt?.replace("T", " ")} (IST)</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground block text-[11px] mb-0.5">Final Closing Deadline:</span>
-                  <span className="font-mono text-foreground font-semibold">{viewingRoleDetailsJob.final_date_pt} (PT)</span>
+                  <span className="font-mono text-foreground font-semibold">{viewingRoleDetailsJob.final_date_pt?.replace("T", " ")} (IST)</span>
                 </div>
                 <div className="col-span-2 sm:col-span-1">
                   <span className="text-muted-foreground block text-[11px] mb-0.5">Official Timezone:</span>
-                  <span className="font-semibold text-foreground">{viewingRoleDetailsJob.timezone || "Pacific Time (PT)"}</span>
+                  <span className="font-semibold text-foreground">{viewingRoleDetailsJob.timezone || "Asia/Kolkata (IST)"}</span>
                 </div>
               </div>
 

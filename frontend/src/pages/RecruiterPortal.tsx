@@ -6,7 +6,7 @@ import {
   FileText, ExternalLink, CheckCircle2, AlertCircle, Plus, Eye, Search,
   ChevronRight, ArrowUpRight, Filter, Download, UserCheck, ShieldCheck, ShieldAlert, LogOut,
   LayoutDashboard, Sparkles, TrendingUp, Settings, Lock, Edit3, Camera, GraduationCap,
-  Award, Phone, Mail, User, Loader2, Video, Link2, Copy
+  Award, Phone, Mail, User, Loader2, Video, Link2, Copy, Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,18 @@ const isPersonalEmail = (email: string) => {
   if (!email || !email.includes("@")) return false;
   const domain = email.split("@").pop()?.trim().toLowerCase() || "";
   return PERSONAL_DOMAINS.includes(domain);
+};
+
+const getISTDateTimeString = (daysOffset: number = 0, hour: number = 9, minute: number = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + daysOffset);
+  d.setHours(hour, minute, 0, 0);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hours = String(d.getHours()).padStart(2, "0");
+  const mins = String(d.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${mins}`;
 };
 
 interface JobPosting {
@@ -160,13 +172,13 @@ export default function RecruiterPortal() {
     vacancies: 1,
     salary_description: "$120,000 - $145,000 / year",
     job_type: "Full-time",
-    location: "Remote (Pacific Time Hours)",
+    location: "Remote (India / Global)",
     description: "",
     requirements: "",
     skills: "",
     recruiting_process: "",
-    start_date_pt: new Date().toISOString().split("T")[0] + " 09:00:00 PDT",
-    final_date_pt: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0] + " 17:00:00 PDT",
+    start_date_pt: getISTDateTimeString(0, 9, 0),
+    final_date_pt: getISTDateTimeString(30, 18, 0),
     company_name: "",
     company_logo_url: "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop",
     organization_symbol: "TECH",
@@ -323,9 +335,10 @@ export default function RecruiterPortal() {
       await apiClient.post(API_ENDPOINTS.recruiter.createJob, jobForm);
 
       toast({
-        title: "Job Posted Successfully!",
-        description: "Your job has been published and submitted for verification.",
+        title: "Job Posted Successfully! 🎉",
+        description: "Your job vacancy is live and displayed in the Client Portal Browse Jobs section.",
       });
+      window.dispatchEvent(new Event("jobPostingsUpdated"));
       loadTrackingData();
       setActiveTab("tracking");
       setTrackingSubTab("jobs");
@@ -338,6 +351,27 @@ export default function RecruiterPortal() {
       });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteJob = async (jobId: number, jobTitle: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete the job vacancy "${jobTitle}"? This will also remove any candidate applications associated with this posting.`)) {
+      return;
+    }
+    try {
+      await apiClient.delete(API_ENDPOINTS.recruiter.deleteJob(jobId));
+      toast({
+        title: "Job Vacancy Deleted 🗑️",
+        description: `Successfully deleted "${jobTitle}" from job postings.`,
+      });
+      window.dispatchEvent(new Event("jobPostingsUpdated"));
+      loadTrackingData();
+    } catch (err: any) {
+      toast({
+        title: "Failed to Delete Job",
+        description: err?.response?.data?.detail || err?.message || "Could not delete job vacancy.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -1303,19 +1337,19 @@ export default function RecruiterPortal() {
                   </CardContent>
                 </Card>
 
-                {/* Pacific Time Window Notice Card */}
+                {/* Indian Standard Time Window Notice Card */}
                 <Card variant="glass" className="border-amber-500/20 bg-amber-500/5">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm font-semibold flex items-center gap-2 text-amber-400">
                       <Calendar className="w-4 h-4" />
-                      Pacific Time (PT) Requirement
+                      Indian Standard Time (IST) Requirement
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="text-xs text-muted-foreground space-y-2">
                     <p>
-                      All applications open and close strictly indexed against <strong>Pacific Time (PST/PDT)</strong>.
+                      All applications open and close strictly indexed against <strong>Indian Standard Time (IST)</strong>.
                     </p>
-                    <p className="text-amber-300 font-mono">Timezone: America/Los_Angeles (PT)</p>
+                    <p className="text-amber-300 font-mono">Timezone: Asia/Kolkata (IST, UTC+05:30)</p>
                   </CardContent>
                 </Card>
               </div>
@@ -1406,34 +1440,36 @@ export default function RecruiterPortal() {
                       </div>
                     </div>
 
-                    {/* Pacific Time Application Window */}
+                    {/* Indian Standard Time Application Window */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-white/5 border border-white/10">
                       <div>
                         <label className="text-sm font-medium mb-1.5 block flex items-center gap-1.5">
-                          <Clock className="w-4 h-4 text-primary" />
-                          Application Starting Date (Pacific Time) *
+                          <Calendar className="w-4 h-4 text-primary" />
+                          Application Starting Date & Time (IST) *
                         </label>
                         <Input
-                          placeholder="YYYY-MM-DD HH:MM:SS PDT"
+                          type="datetime-local"
                           value={jobForm.start_date_pt}
                           onChange={(e) => setJobForm({ ...jobForm, start_date_pt: e.target.value })}
                           required
+                          className="bg-black/30 border-white/10"
                         />
-                        <span className="text-xs text-muted-foreground mt-1 block">e.g. 2026-10-15 09:00:00 PDT</span>
+                        <span className="text-xs text-muted-foreground mt-1 block">Pick start date and time (Indian Standard Time)</span>
                       </div>
 
                       <div>
                         <label className="text-sm font-medium mb-1.5 block flex items-center gap-1.5">
                           <Clock className="w-4 h-4 text-destructive" />
-                          Final Application Date (Pacific Time) *
+                          Final Application Closing Date & Time (IST) *
                         </label>
                         <Input
-                          placeholder="YYYY-MM-DD HH:MM:SS PDT"
+                          type="datetime-local"
                           value={jobForm.final_date_pt}
                           onChange={(e) => setJobForm({ ...jobForm, final_date_pt: e.target.value })}
                           required
+                          className="bg-black/30 border-white/10"
                         />
-                        <span className="text-xs text-muted-foreground mt-1 block">e.g. 2026-11-15 17:00:00 PDT</span>
+                        <span className="text-xs text-muted-foreground mt-1 block">Pick finish date and time (Indian Standard Time)</span>
                       </div>
                     </div>
 
@@ -1797,15 +1833,15 @@ export default function RecruiterPortal() {
                             </div>
                           </div>
 
-                          {/* Pacific Time Application Window */}
+                          {/* Indian Standard Time Application Window */}
                           <div className="p-2.5 rounded-lg bg-white/5 border border-white/5 text-[11px] space-y-1">
                             <div className="flex justify-between text-muted-foreground">
-                              <span>Window Start (PT):</span>
-                              <span className="font-mono text-foreground">{job.start_date_pt}</span>
+                              <span>Window Start (IST):</span>
+                              <span className="font-mono text-foreground">{job.start_date_pt?.replace("T", " ")}</span>
                             </div>
                             <div className="flex justify-between text-muted-foreground">
-                              <span>Window End (PT):</span>
-                              <span className="font-mono text-foreground">{job.final_date_pt}</span>
+                              <span>Window End (IST):</span>
+                              <span className="font-mono text-foreground">{job.final_date_pt?.replace("T", " ")}</span>
                             </div>
                           </div>
 
@@ -1835,17 +1871,28 @@ export default function RecruiterPortal() {
                             <span className="text-xs font-medium text-primary">
                               {job.applications_count || 0} Candidate Application{(job.applications_count || 0) === 1 ? "" : "s"}
                             </span>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setTrackingSubTab("applications");
-                              }}
-                              className="text-xs h-8"
-                            >
-                              View Applicants
-                              <ChevronRight className="w-3.5 h-3.5 ml-1" />
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleDeleteJob(job.id, job.title)}
+                                className="text-xs h-8 text-destructive border-destructive/30 hover:bg-destructive/10 hover:border-destructive"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                                Delete
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setTrackingSubTab("applications");
+                                }}
+                                className="text-xs h-8"
+                              >
+                                View Applicants
+                                <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                              </Button>
+                            </div>
                           </div>
                         </CardContent>
                       </Card>
@@ -2637,7 +2684,7 @@ export default function RecruiterPortal() {
             <div className="space-y-2">
               <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                 <Camera className="w-3.5 h-3.5 text-primary" />
-                Profile Photo / Avatar
+                Profile Photo *
               </Label>
               <div className="flex items-center gap-4">
                 <img
@@ -2649,29 +2696,56 @@ export default function RecruiterPortal() {
                   }}
                 />
                 <div className="flex-1 space-y-1.5">
-                  <Input
-                    placeholder="https://example.com/avatar.jpg"
-                    value={recruiterProfileForm.avatar_url}
-                    onChange={(e) => setRecruiterProfileForm({ ...recruiterProfileForm, avatar_url: e.target.value })}
-                    className="bg-black/30 border-white/10 text-xs"
-                  />
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {[
-                      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=128&h=128&fit=crop",
-                      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=128&h=128&fit=crop",
-                      "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=128&h=128&fit=crop",
-                      "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=128&h=128&fit=crop",
-                    ].map((sampleUrl, idx) => (
-                      <button
+                  <div className="flex items-center gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-all shadow-sm">
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Upload Photo</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            if (file.size > 5 * 1024 * 1024) {
+                              toast({
+                                title: "File Too Large",
+                                description: "Please choose an image file under 5MB.",
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              const base64 = event.target?.result as string;
+                              if (base64) {
+                                setRecruiterProfileForm((prev) => ({ ...prev, avatar_url: base64 }));
+                                toast({
+                                  title: "Photo Selected",
+                                  description: "Your profile photo is ready to save.",
+                                });
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
+                    {recruiterProfileForm.avatar_url && (
+                      <Button
                         type="button"
-                        key={idx}
-                        onClick={() => setRecruiterProfileForm({ ...recruiterProfileForm, avatar_url: sampleUrl })}
-                        className="text-[10px] px-2 py-0.5 rounded-md bg-white/5 hover:bg-primary/20 hover:text-primary transition-colors border border-white/10"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setRecruiterProfileForm((prev) => ({ ...prev, avatar_url: "" }))}
+                        className="text-xs text-muted-foreground hover:text-destructive h-7"
                       >
-                        Avatar {idx + 1}
-                      </button>
-                    ))}
+                        Remove
+                      </Button>
+                    )}
                   </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Upload official recruiter picture from device (JPG/PNG/WebP under 5MB).
+                  </p>
                 </div>
               </div>
             </div>

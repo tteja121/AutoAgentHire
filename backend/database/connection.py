@@ -201,46 +201,10 @@ def init_db():
                 if not getattr(existing_auth, "custom_user_id", None):
                     existing_auth.custom_user_id = "AUTH-001"  # type: ignore
                 db.commit()
-
-            # Seed pre-configured Recruiter account: Re@auto.in / Re@123
-            existing_rec = db.query(User).filter(
-                (User.custom_user_id == "REC-1001") | (User.email.ilike("re@auto.in"))
-            ).first()
-            if not existing_rec:
-                new_rec = User(
-                    email="Re@auto.in",
-                    hashed_password=hash_password("Re@123"),
-                    full_name="Verified Recruiter",
-                    company_name="AutoHire Partner Tech",
-                    company_logo_url="https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop",
-                    role="recruiter",
-                    custom_user_id="REC-1001",
-                    approval_status="approved",
-                    is_active=True,
-                    is_verified=True,
-                )
-                db.add(new_rec)
-                db.commit()
-                print("[DB] Recruiter account seeded: Re@auto.in (ID: REC-1001)")
-            else:
-                existing_rec.role = "recruiter"  # type: ignore
-                existing_rec.approval_status = "approved"  # type: ignore
-                existing_rec.is_active = True  # type: ignore
-                existing_rec.hashed_password = hash_password("Re@123")  # type: ignore
-                if not getattr(existing_rec, "custom_user_id", None):
-                    existing_rec.custom_user_id = "REC-1001"  # type: ignore
-                if not existing_rec.company_name:
-                    existing_rec.company_name = "AutoHire Partner Tech"  # type: ignore
-                db.commit()
-
-            # Seed standard job postings if none or very few exist
-            try:
-                from backend.database.seed_jobs import seed_jobs
-                seed_jobs()
-            except Exception as e:
-                print(f"[DB] Jobs seed note: {e}")
+            # Retain standard platform Authorizer account
+            print("[DB] Platform Authorizer initialized: Author@auto.in (ID: AUTH-001)")
     except Exception as e:
-        print("[DB] Accounts seed note: " + str(e))
+        print("[DB] Accounts init note: " + str(e))
 
 
 

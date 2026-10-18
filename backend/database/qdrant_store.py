@@ -289,7 +289,7 @@ class QdrantVectorStore:
             collection_name=COLLECTION_JOBS,
             points=[PointStruct(id=point_id, vector=vector, payload=payload)],
         )
-        print("[QD] Job stored job_id=" + str(job_id) + " id=" + point_id[:8] + "...")
+        print(f"[QD] Job stored job_id={job_id} id={point_id[:8]}...")
         return point_id
 
     def find_jobs_matching_resume(self, resume_text: str, top_k: int = 10) -> List[Dict]:

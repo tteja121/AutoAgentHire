@@ -158,7 +158,11 @@ const App = () => (
               <Route element={<DashboardLayout />}>
                 <Route path="/ats-checker" element={<Navigate to="/candidate/jobs" replace />} />
                 <Route path="/candidate/jobs" element={<CandidateJobsPage />} />
+                <Route path="/jobs" element={<Navigate to="/candidate/jobs" replace />} />
+                <Route path="/browse-jobs" element={<Navigate to="/candidate/jobs" replace />} />
               </Route>
+              <Route path="/recruiter/dashboard" element={<Navigate to="/recruiter" replace />} />
+              <Route path="/authorizer/dashboard" element={<Navigate to="/authorizer" replace />} />
               <Route
                 path="/recruiter"
                 element={

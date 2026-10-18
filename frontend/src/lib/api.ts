@@ -227,6 +227,7 @@ export const API_ENDPOINTS = {
     authorizerAuditLogs: '/api/recruiter/authorizer/audit-logs',
     candidateJobs: '/api/recruiter/candidate/jobs',
     applyJob: (id: number) => `/api/recruiter/candidate/apply/${id}`,
+    deleteJob: (id: number) => `/api/recruiter/jobs/${id}`,
   },
 
   // Settings & Profile

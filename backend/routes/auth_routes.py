@@ -442,16 +442,7 @@ def resolve_user_id(body: ResolveUserIdRequest, db: Session = Depends(get_db)):
             detail="User ID is required.",
         )
     
-    # Pre-configured demo accounts
-    if uid.upper() == "REC-1001":
-        return ResolveUserIdResponse(
-            status="success",
-            email="Re@auto.in",
-            role="recruiter",
-            full_name="Verified Recruiter",
-            company_name="AutoHire Partner Tech",
-            custom_user_id="REC-1001",
-        )
+    # Pre-configured Authorizer account
     if uid.upper() == "AUTH-001":
         return ResolveUserIdResponse(
             status="success",
@@ -511,9 +502,8 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
     # Official email validation: Recruiters & Authorizers must NOT use public/personal domains
     if is_email_pattern and expected_role in ("recruiter", "authorizer"):
-        is_demo_rec = identifier_clean.lower() == "re@auto.in"
         is_demo_auth = identifier_clean.lower() == "author@auto.in"
-        if not is_demo_rec and not is_demo_auth and is_personal_email_domain(identifier_clean):
+        if not is_demo_auth and is_personal_email_domain(identifier_clean):
             domain = identifier_clean.split("@")[-1].lower()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -528,14 +518,13 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     import logging as _logging
     _log = _logging.getLogger(__name__)
 
-    # Special check for Authorizer and Recruiter pre-configured credentials
+    # Special check for Authorizer pre-configured credentials
     is_authorizer = identifier_clean.lower() in ("author@auto.in", "auth-001")
-    is_demo_recruiter = identifier_clean.lower() in ("re@auto.in", "rec-1001")
 
     # Look up user by identifier (email, custom_user_id, or uuid)
     user = UserRepository.get_by_identifier(db, identifier_clean)
 
-    # Handle Authorizer, Demo Recruiter, or existing user / auto-signup
+    # Handle Authorizer or existing user / auto-signup
     if user is None:
         if is_authorizer:
             hashed = hash_password("Author@123")
@@ -546,18 +535,6 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
                 full_name="System Authorizer",
                 role="authorizer",
                 custom_user_id="AUTH-001",
-                approval_status="approved",
-            )
-        elif is_demo_recruiter:
-            hashed = hash_password("Re@123")
-            user = UserRepository.create(
-                db,
-                email="Re@auto.in",
-                hashed_password=hashed,
-                full_name="Verified Recruiter",
-                company_name="AutoHire Partner Tech",
-                role="recruiter",
-                custom_user_id="REC-1001",
                 approval_status="approved",
             )
         elif is_email_pattern and expected_role in (None, "candidate"):
@@ -584,17 +561,6 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials. Please verify your User ID or email and password.",
             )
-
-    # Sync pre-configured credentials if password matches official seed
-    if is_demo_recruiter and user is not None and body.password == "Re@123":
-        if not verify_password("Re@123", str(user.hashed_password)):
-            user.hashed_password = hash_password("Re@123")  # type: ignore
-            db.commit()
-        user.role = "recruiter"  # type: ignore
-        user.approval_status = "approved"  # type: ignore
-        if not getattr(user, "custom_user_id", None):
-            user.custom_user_id = "REC-1001"  # type: ignore
-        db.commit()
 
     if is_authorizer and user is not None and body.password == "Author@123":
         if not verify_password("Author@123", str(user.hashed_password)):

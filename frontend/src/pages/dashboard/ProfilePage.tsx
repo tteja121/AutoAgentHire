@@ -451,39 +451,68 @@ export default function ProfilePage() {
           </DialogHeader>
 
           <form onSubmit={handleSaveProfile} className="space-y-5 pt-2">
-            {/* 1. Photo Section */}
+            {/* 1. Photo Section - Device File Upload */}
             <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
               <Label className="text-xs font-semibold uppercase text-muted-foreground block">
-                1. Profile Photo / Avatar *
+                1. Profile Photo *
               </Label>
-              <div className="flex flex-col sm:flex-row items-center gap-4">
+              <div className="flex flex-col sm:flex-row items-center gap-5">
                 <img
                   src={editForm.avatar_url || DEFAULT_AVATARS[0]}
                   alt="Preview"
-                  className="w-20 h-20 rounded-2xl object-cover border-2 border-primary/40 shadow-md shrink-0"
+                  className="w-20 h-20 rounded-2xl object-cover border-2 border-primary/40 shadow-md shrink-0 bg-muted"
                 />
                 <div className="w-full space-y-2">
-                  <Input
-                    placeholder="Paste image URL (https://...)"
-                    value={editForm.avatar_url || ""}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, avatar_url: e.target.value }))}
-                    className="text-xs"
-                  />
-                  <div className="flex items-center gap-2 overflow-x-auto py-1">
-                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">Presets:</span>
-                    {DEFAULT_AVATARS.map((url, i) => (
-                      <button
-                        key={i}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-all shadow-sm">
+                      <Camera className="w-4 h-4" />
+                      <span>Upload Photo from Device</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            if (file.size > 5 * 1024 * 1024) {
+                              toast({
+                                title: "File Too Large",
+                                description: "Please choose an image file under 5MB.",
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              const base64 = event.target?.result as string;
+                              if (base64) {
+                                setEditForm((prev) => ({ ...prev, avatar_url: base64 }));
+                                toast({
+                                  title: "Photo Selected",
+                                  description: "Your profile photo is ready to save.",
+                                });
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
+                    {editForm.avatar_url && (
+                      <Button
                         type="button"
-                        onClick={() => setEditForm(prev => ({ ...prev, avatar_url: url }))}
-                        className={`w-7 h-7 rounded-lg overflow-hidden border-2 transition-transform hover:scale-110 ${
-                          editForm.avatar_url === url ? "border-primary scale-105" : "border-transparent opacity-70"
-                        }`}
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditForm((prev) => ({ ...prev, avatar_url: "" }))}
+                        className="text-xs text-muted-foreground hover:text-destructive h-8"
                       >
-                        <img src={url} alt={`Preset ${i}`} className="w-full h-full object-cover" />
-                      </button>
-                    ))}
+                        Remove Photo
+                      </Button>
+                    )}
                   </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Upload your actual profile photo (JPG, PNG, or WebP up to 5MB). Direct device file upload only.
+                  </p>
                 </div>
               </div>
             </div>

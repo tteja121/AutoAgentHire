@@ -1565,12 +1565,12 @@ export default function AuthorizerPortal() {
 
                           <div className="p-2.5 rounded-lg bg-white/5 border border-white/5 text-[11px] space-y-1">
                             <div className="flex justify-between text-muted-foreground">
-                              <span>Window Start (PT):</span>
-                              <span className="font-mono text-foreground">{job.start_date_pt}</span>
+                              <span>Window Start (IST):</span>
+                              <span className="font-mono text-foreground">{job.start_date_pt?.replace("T", " ")}</span>
                             </div>
                             <div className="flex justify-between text-muted-foreground">
-                              <span>Window End (PT):</span>
-                              <span className="font-mono text-foreground">{job.final_date_pt}</span>
+                              <span>Window End (IST):</span>
+                              <span className="font-mono text-foreground">{job.final_date_pt?.replace("T", " ")}</span>
                             </div>
                           </div>
 
@@ -2002,12 +2002,12 @@ export default function AuthorizerPortal() {
                   <span className="font-medium text-foreground">{selectedJob.vacancies} open position(s)</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground block">Application Starts (PT)</span>
-                  <span className="font-mono text-foreground">{selectedJob.start_date_pt}</span>
+                  <span className="text-muted-foreground block">Application Starts (IST)</span>
+                  <span className="font-mono text-foreground">{selectedJob.start_date_pt?.replace("T", " ")}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground block">Application Deadline (PT)</span>
-                  <span className="font-mono text-foreground">{selectedJob.final_date_pt}</span>
+                  <span className="text-muted-foreground block">Application Deadline (IST)</span>
+                  <span className="font-mono text-foreground">{selectedJob.final_date_pt?.replace("T", " ")}</span>
                 </div>
               </div>
 
@@ -2276,7 +2276,7 @@ export default function AuthorizerPortal() {
             <div className="space-y-2">
               <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                 <Camera className="w-3.5 h-3.5 text-purple-400" />
-                Profile Photo / Avatar
+                Profile Photo *
               </Label>
               <div className="flex items-center gap-4">
                 <img
@@ -2288,29 +2288,56 @@ export default function AuthorizerPortal() {
                   }}
                 />
                 <div className="flex-1 space-y-1.5">
-                  <Input
-                    placeholder="https://example.com/avatar.jpg"
-                    value={authorizerProfileForm.avatar_url}
-                    onChange={(e) => setAuthorizerProfileForm({ ...authorizerProfileForm, avatar_url: e.target.value })}
-                    className="bg-black/30 border-white/10 text-xs"
-                  />
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {[
-                      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=128&h=128&fit=crop",
-                      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=128&h=128&fit=crop",
-                      "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=128&h=128&fit=crop",
-                      "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=128&h=128&fit=crop",
-                    ].map((sampleUrl, idx) => (
-                      <button
+                  <div className="flex items-center gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold transition-all shadow-sm">
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Upload Photo</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            if (file.size > 5 * 1024 * 1024) {
+                              toast({
+                                title: "File Too Large",
+                                description: "Please choose an image file under 5MB.",
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              const base64 = event.target?.result as string;
+                              if (base64) {
+                                setAuthorizerProfileForm((prev) => ({ ...prev, avatar_url: base64 }));
+                                toast({
+                                  title: "Photo Selected",
+                                  description: "Your authorizer profile photo is ready to save.",
+                                });
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
+                    {authorizerProfileForm.avatar_url && (
+                      <Button
                         type="button"
-                        key={idx}
-                        onClick={() => setAuthorizerProfileForm({ ...authorizerProfileForm, avatar_url: sampleUrl })}
-                        className="text-[10px] px-2 py-0.5 rounded-md bg-white/5 hover:bg-purple-500/20 hover:text-purple-300 transition-colors border border-white/10"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setAuthorizerProfileForm((prev) => ({ ...prev, avatar_url: "" }))}
+                        className="text-xs text-muted-foreground hover:text-destructive h-7"
                       >
-                        Avatar {idx + 1}
-                      </button>
-                    ))}
+                        Remove
+                      </Button>
+                    )}
                   </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Upload official governance photo from device (JPG/PNG/WebP under 5MB).
+                  </p>
                 </div>
               </div>
             </div>

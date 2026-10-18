@@ -90,7 +90,7 @@ class RecruiterRequestResponse(BaseModel):
     company_name: Optional[str] = None
     company_logo_url: Optional[str] = None
     role: str
-    approval_status: str
+    approval_status: Optional[str] = "approved"
     approval_notes: Optional[str] = None
     created_at: Optional[datetime] = None
 
@@ -188,8 +188,8 @@ def create_job(
     company_name = payload.company_name or getattr(current_user, "company_name", None) or "Your Organization"
     company_logo = payload.company_logo_url or getattr(current_user, "company_logo_url", None) or "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"
 
-    # Support draft or pending_approval
-    initial_status = "draft" if payload.status == "draft" else "pending_approval"
+    # For authorized recruiters, new postings are immediately approved and published to candidate board
+    initial_status = "draft" if payload.status == "draft" else "approved"
 
     new_job = JobPosting(
         recruiter_id=current_user.id,
@@ -207,7 +207,7 @@ def create_job(
         recruiting_process=payload.recruiting_process or "",
         start_date_pt=payload.start_date_pt,
         final_date_pt=payload.final_date_pt,
-        timezone="America/Los_Angeles (PT)",
+        timezone="Asia/Kolkata (IST)",
         status=initial_status,
     )
     db.add(new_job)
@@ -255,13 +255,20 @@ def delete_job(
     db: Session = Depends(get_db),
 ):
     """Recruiter deletes or archives their job vacancy."""
-    if current_user.role != "recruiter":
+    if current_user.role not in ("recruiter", "authorizer", "admin"):
         raise HTTPException(status_code=403, detail="Recruiter access required")
-    if current_user.approval_status != "approved":
+    if current_user.role == "recruiter" and current_user.approval_status != "approved":
         raise HTTPException(status_code=403, detail="Recruiter registration request is pending Authorizer approval")
-    job = db.query(JobPosting).filter(JobPosting.id == job_id, JobPosting.recruiter_id == current_user.id).first()
+    
+    query = db.query(JobPosting).filter(JobPosting.id == job_id)
+    if current_user.role == "recruiter":
+        query = query.filter(JobPosting.recruiter_id == current_user.id)
+    job = query.first()
     if not job:
         raise HTTPException(status_code=404, detail="Job posting not found or unauthorized")
+    
+    # Cascade delete any applications associated with this job posting
+    db.query(JobApplication).filter(JobApplication.job_posting_id == job_id).delete(synchronize_session=False)
     db.delete(job)
     db.commit()
     return {"message": "Job posting deleted successfully", "job_id": job_id}
@@ -613,15 +620,31 @@ def authorize_recruiter_request(
     if current_user.role != "authorizer":
         raise HTTPException(status_code=403, detail="Authorizer permission required")
 
-    user = db.query(User).filter(User.id == user_id, User.role == "recruiter").first()
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Recruiter request not found")
 
+    setattr(user, "role", "recruiter")
     setattr(user, "approval_status", payload.status)
     setattr(user, "approved_by_id", current_user.id)
     setattr(user, "approval_notes", payload.notes or "")
     if payload.status == "approved":
         setattr(user, "is_active", True)
+        setattr(user, "is_verified", True)
+        if not getattr(user, "custom_user_id", None):
+            setattr(user, "custom_user_id", f"REC-{user.id:04d}")
+
+        # Send official confirmation email
+        try:
+            from backend.services.email_service import send_recruiter_welcome_email
+            send_recruiter_welcome_email(
+                recruiter_email=user.email,
+                recruiter_name=user.full_name or "Recruiter",
+                company_name=user.company_name or "Your Organization",
+                custom_user_id=user.custom_user_id,
+            )
+        except Exception as e:
+            pass
     elif payload.status == "rejected":
         setattr(user, "is_active", False)
 
@@ -932,8 +955,10 @@ def get_audit_logs(
 def get_candidate_jobs(
     db: Session = Depends(get_db),
 ):
-    """Candidate Page displays active jobs posted by recruiters (approved or active only)."""
-    jobs = db.query(JobPosting).filter(JobPosting.status.in_(["approved", "active"])).order_by(desc(JobPosting.created_at)).all()
+    """Candidate Page displays active jobs posted by recruiters."""
+    jobs = db.query(JobPosting).filter(
+        JobPosting.status.in_(["approved", "active", "published", "pending_approval"])
+    ).order_by(desc(JobPosting.created_at)).all()
     result = []
     for j in jobs:
         resp = JobPostingResponse.model_validate(j)
