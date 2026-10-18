@@ -96,8 +96,9 @@ class MultiAIService:
                 
                 genai.configure(api_key=key)  # type: ignore
                 # Use the latest stable Gemini model
-                self.client = genai.GenerativeModel("gemini-2.5-flash")  # type: ignore
-                logger.info("Initialized Gemini AI service with gemini-2.5-flash")
+                gemini_model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+                self.client = genai.GenerativeModel(gemini_model)  # type: ignore
+                logger.info(f"Initialized Gemini AI service with {gemini_model}")
                 
             elif provider == "groq":
                 if not GROQ_AVAILABLE:

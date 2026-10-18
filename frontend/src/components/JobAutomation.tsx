@@ -3,7 +3,8 @@ import {
   Upload, CheckCircle2, Loader2, FileText, Briefcase, Eye, 
   ExternalLink, Sparkles, Building, MapPin, DollarSign, Clock, 
   ShieldCheck, User, Mail, Phone, Send, Check, AlertCircle, ArrowRight,
-  Sliders, Filter, RefreshCw, CheckCheck, ChevronRight
+  Sliders, Filter, RefreshCw, CheckCheck, ChevronRight, Copy, Info,
+  CheckCircle, ListChecks, HelpCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -33,14 +34,19 @@ export interface MatchedJob {
   match_percentage: number;
   matching_skills: string[];
   missing_skills: string[];
+  experience_compatibility?: string;
+  suitability_reason?: string;
+  improvement_suggestions?: string[];
   description: string;
   applied: boolean;
 }
 
 export interface ExtractedProfile {
+  resume_id?: number;
   candidate_name: string;
   email: string;
   phone: string;
+  location?: string;
   professional_summary: string;
   total_experience: string;
   skills: {
@@ -54,6 +60,30 @@ export interface ExtractedProfile {
   config_message?: string;
   strengths?: string[];
   missing_skills?: string[];
+  career_highlights?: string[];
+  suggested_improvements?: string[];
+  facts_vs_inferences?: {
+    explicit_facts: string[];
+    inferences: string[];
+  };
+  last_updated?: string;
+}
+
+export interface ResumeOptimizationData {
+  job_title: string;
+  company: string;
+  missing_keywords: string[];
+  bullet_point_improvements: Array<{
+    original: string;
+    improved: string;
+    rationale: string;
+  }>;
+  project_descriptions: Array<{
+    project_name: string;
+    suggestions: string;
+  }>;
+  formatting_recommendations: string[];
+  tailored_professional_summary: string;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '';
@@ -87,12 +117,30 @@ export default function JobAutomation() {
   const [showApplyAllModal, setShowApplyAllModal] = useState(false);
   const [isSubmittingBatch, setIsSubmittingBatch] = useState(false);
 
+  // Resume Optimization Modal States
+  const [optimizingJob, setOptimizingJob] = useState<MatchedJob | null>(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizationData, setOptimizationData] = useState<ResumeOptimizationData | null>(null);
+  const [showOptimizeModal, setShowOptimizeModal] = useState(false);
+  const [copiedSummary, setCopiedSummary] = useState(false);
+
   // Clean up preview URL on unmount
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  // Load candidate profile on mount if available
+  useEffect(() => {
+    const existing = getCandidateProfile();
+    if (existing && existing.candidate_name) {
+      setClientName(existing.candidate_name);
+      setClientEmail(existing.email || '');
+      setClientPhone(existing.phone || '');
+      setClientExperience(existing.experience || '');
+    }
+  }, []);
 
   // Handle resume file upload and auto-trigger Gemini AI analysis
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -117,8 +165,15 @@ export default function JobAutomation() {
       const formData = new FormData();
       formData.append('file', file);
 
+      const token = localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token') || '';
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/ats/parse-resume`, {
         method: 'POST',
+        headers,
         body: formData,
       });
 
@@ -126,9 +181,15 @@ export default function JobAutomation() {
         let errMessage = 'Failed to analyze resume';
         try {
           const errData = await response.json();
-          errMessage = errData.detail || errData.message || errMessage;
+          if (typeof errData.detail === 'string') {
+            errMessage = errData.detail;
+          } else if (errData.detail && typeof errData.detail === 'object') {
+            errMessage = errData.detail.message || errData.detail.error || errMessage;
+          } else if (errData.message) {
+            errMessage = errData.message;
+          }
         } catch {
-          // ignore json error
+          // ignore json parsing errors
         }
         throw new Error(errMessage);
       }
@@ -141,12 +202,14 @@ export default function JobAutomation() {
       const domainSkills: string[] = skillsObj.domain || [];
       const allSkills: string[] = data.all_skills || [...techSkills, ...profSkills, ...domainSkills];
 
-      const parsedExp = data.total_experience || '2+ years';
+      const parsedExp = data.total_experience || 'Fresher / Entry-Level (0-1 year)';
 
       const extractedProfile: ExtractedProfile = {
+        resume_id: data.resume_id,
         candidate_name: data.candidate_name || 'Candidate',
         email: data.email || '',
         phone: data.phone || '',
+        location: data.location || '',
         professional_summary: data.professional_summary || '',
         total_experience: parsedExp,
         skills: {
@@ -160,6 +223,10 @@ export default function JobAutomation() {
         config_message: data.config_message,
         strengths: data.strengths || [],
         missing_skills: data.missing_skills || [],
+        career_highlights: data.career_highlights || [],
+        suggested_improvements: data.suggested_improvements || [],
+        facts_vs_inferences: data.facts_vs_inferences || { explicit_facts: [], inferences: [] },
+        last_updated: data.last_updated || new Date().toISOString(),
       };
 
       setProfile(extractedProfile);
@@ -181,9 +248,12 @@ export default function JobAutomation() {
         location: j.location || 'Remote',
         employment_type: j.employment_type || j.job_type || 'Full-time',
         salary_range: j.salary_range || j.salary_description || 'Competitive',
-        match_percentage: Number(j.match_percentage) || 85,
+        match_percentage: Number(j.match_percentage) || 80,
         matching_skills: j.matching_skills || j.matched_skills || [],
         missing_skills: j.missing_skills || [],
+        experience_compatibility: j.experience_compatibility,
+        suitability_reason: j.suitability_reason,
+        improvement_suggestions: j.improvement_suggestions || [],
         description: j.description || '',
         applied: false,
       }));
@@ -191,8 +261,8 @@ export default function JobAutomation() {
       setMatchedJobs(jobsFromBackend);
 
       toast({
-        title: extractedProfile.ai_powered ? '✨ Gemini AI Analysis Complete!' : 'Resume Analysis Ready',
-        description: `Recognized ${allSkills.length} skills, extracted ${parsedExp} experience, and found ${jobsFromBackend.length} matching jobs.`,
+        title: extractedProfile.ai_powered ? '✨ Google Gemini AI Analysis Complete!' : 'Resume Analysis Ready',
+        description: `Extracted ${allSkills.length} skills, evaluated ${parsedExp} experience, and matched ${jobsFromBackend.length} active database vacancies.`,
       });
 
     } catch (err: any) {
@@ -216,12 +286,71 @@ export default function JobAutomation() {
     }
   };
 
+  // Trigger Gemini Resume Optimization for a specific job
+  const handleOpenOptimizeModal = async (job: MatchedJob) => {
+    setOptimizingJob(job);
+    setShowOptimizeModal(true);
+    setIsOptimizing(true);
+    setOptimizationData(null);
+    setCopiedSummary(false);
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token') || '';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/ats/optimize-resume`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          job_id: job.id,
+          resume_id: profile?.resume_id,
+        }),
+      });
+
+      if (!res.ok) {
+        let err = 'Optimization failed';
+        try {
+          const d = await res.json();
+          err = d.detail || err;
+        } catch {}
+        throw new Error(err);
+      }
+
+      const data = await res.json();
+      setOptimizationData(data);
+    } catch (err: any) {
+      console.error('Optimization error:', err);
+      toast({
+        title: 'Optimization Error',
+        description: err.message || 'Could not retrieve tailored suggestions.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
+  const handleCopySummary = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedSummary(true);
+    toast({
+      title: 'Copied to Clipboard!',
+      description: 'Tailored summary copied successfully.',
+    });
+    setTimeout(() => setCopiedSummary(false), 2500);
+  };
+
   // 1. Jobs filtered by percentage adjustment bar
   const jobsFilteredByPercentage = useMemo(() => {
     return matchedJobs.filter(j => j.match_percentage >= minMatchPercentage);
   }, [matchedJobs, minMatchPercentage]);
 
-  // Counts for the small taps inside the Matching Jobs container
+  // Counts for the category taps
   const tapCounts = useMemo(() => {
     const pool = jobsFilteredByPercentage;
     return {
@@ -264,7 +393,7 @@ export default function JobAutomation() {
         prev.map(j => (j.id === jobId ? { ...j, applied: true } : j))
       );
 
-      // Persist application to Client Store & SQLite Database via applicationService
+      // Persist application to Client Store & Database
       await applicationService.saveClientApplication({
         id: jobId,
         title: targetJob?.title || 'Software Engineer',
@@ -281,7 +410,7 @@ export default function JobAutomation() {
 
       toast({
         title: 'Application Submitted! 🎉',
-        description: `Personalized confirmation email sent to ${recipientEmail} for ${targetJob?.title} at ${targetJob?.company}!`,
+        description: `Personalized application dispatched for ${targetJob?.title} at ${targetJob?.company}!`,
       });
     } catch (err: any) {
       toast({
@@ -293,7 +422,7 @@ export default function JobAutomation() {
 
   // Open "Check details of the client" popup
   const handleOpenApplyAllModal = () => {
-    if (!resumeFile) {
+    if (!resumeFile && !profile) {
       toast({
         title: 'Resume Required',
         description: 'Please upload a resume first to identify matching jobs.',
@@ -335,7 +464,6 @@ export default function JobAutomation() {
       const verifiedExp = (clientExperience || (profile as any)?.experience || 'Experience verified from resume').trim();
       const resumeName = resumeFile?.name || (profile as any)?.resume_name || 'resume.pdf';
 
-      // 1. Send batch application to backend endpoint and store in Client Store
       await applicationService.applyBatchApplications({
         candidate_name: recipientName,
         candidate_email: recipientEmail,
@@ -351,7 +479,6 @@ export default function JobAutomation() {
         })),
       });
 
-      // 2. Mark targeted jobs as applied in local state
       setMatchedJobs(prev =>
         prev.map(j => (targetJobIds.includes(j.id) ? { ...j, applied: true } : j))
       );
@@ -360,12 +487,11 @@ export default function JobAutomation() {
 
       toast({
         title: '🎉 Applications Submitted Successfully!',
-        description: `Personalized thank you email sent to ${recipientEmail} for each of the ${targetJobIds.length} applied positions!`,
+        description: `Dispatched applications to ${targetJobIds.length} positions!`,
       });
 
     } catch (err: any) {
       console.error('Batch apply error:', err);
-      // Fallback update
       const targetJobIds = unappliedDisplayedJobs.map(j => j.id);
       setMatchedJobs(prev =>
         prev.map(j => (targetJobIds.includes(j.id) ? { ...j, applied: true } : j))
@@ -392,16 +518,26 @@ export default function JobAutomation() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2.5">
             <Sparkles className="w-7 h-7 text-primary" />
-            Job Automation & Skill Matching
+            Job Automation & Resume Intelligence
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Upload your resume for real-time Google Gemini AI skill extraction, percentage adjustment filtering, and automated job matching.
+            Google Gemini-powered resume analysis, grounded job matching, and real-time ATS optimization.
           </p>
         </div>
+
+        {profile?.ai_powered && (
+          <div className="flex items-center gap-2">
+            <Badge className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-3 py-1 flex items-center gap-1.5 shadow-xs">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>⚡ Google Gemini AI Active</span>
+              <span className="opacity-70 text-[10px]">({profile.model_used || 'gemini-flash-latest'})</span>
+            </Badge>
+          </div>
+        )}
       </div>
 
       {/* =========================================================================
-          CONTAINER 1: RESUME CONTAINER (RETAINED & AI-POWERED)
+          CONTAINER 1: RESUME CONTAINER & AI INSIGHTS
          ========================================================================= */}
       <Card className="border border-primary/20 shadow-sm bg-card/60 backdrop-blur-sm">
         <CardHeader className="pb-4">
@@ -415,11 +551,10 @@ export default function JobAutomation() {
                 Upload your resume in PDF, DOCX, or TXT format for deep AI parsing, experience extraction, and skill discovery.
               </CardDescription>
             </div>
-            {profile?.ai_powered && (
-              <Badge className="bg-emerald-500/15 text-emerald-500 border-emerald-500/30 flex items-center gap-1.5 px-3 py-1">
-                <Sparkles className="w-3.5 h-3.5" />
-                Google Gemini AI Active
-              </Badge>
+            {profile?.last_updated && (
+              <span className="text-xs text-muted-foreground">
+                Last Analyzed: {new Date(profile.last_updated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
             )}
           </div>
         </CardHeader>
@@ -474,7 +609,7 @@ export default function JobAutomation() {
 
           {/* Profile Overview Card (After parsing) */}
           {profile && (
-            <div className="p-4 rounded-xl bg-muted/40 border border-border/80 space-y-3">
+            <div className="p-4 rounded-xl bg-muted/40 border border-border/80 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
@@ -496,7 +631,7 @@ export default function JobAutomation() {
                   <Badge variant="outline" className="text-xs py-1 border-primary/30 text-primary">
                     {allSkillsList.length} Skills Extracted
                   </Badge>
-                  <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 text-xs py-1">
+                  <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-xs py-1">
                     {profile.total_experience}
                   </Badge>
                 </div>
@@ -504,17 +639,83 @@ export default function JobAutomation() {
 
               {profile.professional_summary && (
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  <strong className="text-foreground font-medium">Summary: </strong>
+                  <strong className="text-foreground font-medium">Professional Summary: </strong>
                   {profile.professional_summary}
                 </p>
               )}
 
-              {profile.config_message && !profile.ai_powered && (
+              {/* Status Banner */}
+              {profile.ai_powered ? (
+                <div className="text-[11px] p-2.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>Live Google Gemini AI active ({profile.model_used || 'gemini-flash-latest'}). Structured intelligence verified from actual document text.</span>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30 shrink-0">
+                    Live Verified ✓
+                  </Badge>
+                </div>
+              ) : profile.config_message && (
                 <div className="text-[11px] p-2.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-300 flex items-start gap-2">
                   <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                   <span>{profile.config_message}</span>
                 </div>
               )}
+
+              {/* AI Resume Insights Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                {/* Verified Facts vs Inferences */}
+                <div className="p-3 rounded-lg bg-background/50 border border-border/70 space-y-2">
+                  <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                    Verified Facts vs Inferences
+                  </h4>
+                  <div className="space-y-1 text-[11px] text-muted-foreground">
+                    <div className="font-medium text-foreground text-[10px] uppercase tracking-wider text-emerald-400/90">
+                      Explicit Facts:
+                    </div>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {profile.facts_vs_inferences?.explicit_facts?.slice(0, 3).map((f, i) => (
+                        <li key={i} className="line-clamp-2">{f}</li>
+                      )) || <li>Degrees and stated technical toolset extracted.</li>}
+                    </ul>
+                    <div className="font-medium text-foreground text-[10px] uppercase tracking-wider text-blue-400/90 pt-1">
+                      Model Inferences:
+                    </div>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {profile.facts_vs_inferences?.inferences?.slice(0, 2).map((inf, i) => (
+                        <li key={i} className="line-clamp-2">{inf}</li>
+                      )) || <li>Experience calculated at {profile.total_experience}.</li>}
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Candidate Strengths & Suggested Improvements */}
+                <div className="p-3 rounded-lg bg-background/50 border border-border/70 space-y-2">
+                  <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-primary" />
+                    Key Strengths & ATS Tips
+                  </h4>
+                  {profile.strengths && profile.strengths.length > 0 && (
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Strengths:</span>
+                      <ul className="list-disc list-inside text-[11px] text-muted-foreground space-y-0.5">
+                        {profile.strengths.slice(0, 2).map((s, i) => (
+                          <li key={i} className="line-clamp-2">{s}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {profile.suggested_improvements && profile.suggested_improvements.length > 0 && (
+                    <div className="space-y-1 pt-1 border-t border-border/50">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-amber-400/90">ATS Optimization Tip:</span>
+                      <p className="text-[11px] text-muted-foreground line-clamp-2">
+                        {profile.suggested_improvements[0]}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </CardContent>
@@ -606,7 +807,7 @@ export default function JobAutomation() {
                       <Badge 
                         key={idx} 
                         variant="outline"
-                        className="text-xs py-1 px-2.5 border-dashed"
+                        className="text-xs py-1 px-2.5 border-border/80"
                       >
                         {skill}
                       </Badge>
@@ -620,57 +821,44 @@ export default function JobAutomation() {
       </Card>
 
       {/* =========================================================================
-          FEATURE 1: PERCENTAGE ADJUSTMENT BAR (BELOW SKILLS CONTAINER)
+          PERCENTAGE ADJUSTMENT BAR (CONTROLS JOBS BELOW)
          ========================================================================= */}
-      <Card className="border border-primary/25 shadow-sm bg-gradient-to-r from-card/90 via-card/60 to-primary/[0.04] backdrop-blur-sm">
-        <CardContent className="p-5 space-y-4">
+      <Card className="border border-border/70 shadow-sm bg-card/60 backdrop-blur-sm">
+        <CardHeader className="pb-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-foreground font-semibold text-base">
-                <Sliders className="w-4 h-4 text-primary" />
-                <span>Match Percentage Adjustment Bar</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
+            <div>
+              <CardTitle className="text-xl flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-primary" />
+                Match Percentage Adjustment Bar
+              </CardTitle>
+              <CardDescription>
                 Slide to dynamically adjust the compatibility threshold and discover jobs that fit your profile.
-              </p>
+              </CardDescription>
             </div>
-
-            {/* Threshold indicator badge */}
-            <div className="flex items-center gap-2.5 shrink-0">
+            <div className="flex items-center gap-3 self-start sm:self-center">
               <span className="text-xs text-muted-foreground">Threshold:</span>
-              <Badge 
-                className={`text-xs px-3 py-1 font-bold ${
-                  minMatchPercentage >= 90
-                    ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
-                    : minMatchPercentage >= 80
-                    ? 'bg-blue-500/15 text-blue-500 border-blue-500/30'
-                    : 'bg-primary/10 text-primary border-primary/20'
-                }`}
-              >
-                ≥ {minMatchPercentage}% Match
+              <Badge className="bg-primary/15 text-primary border border-primary/30 font-bold text-sm px-3 py-1">
+                &gt; {minMatchPercentage}% Match
               </Badge>
-              <span className="text-xs text-muted-foreground font-medium">
+              <span className="text-xs text-muted-foreground">
                 ({jobsFilteredByPercentage.length} Jobs Qualify)
               </span>
             </div>
           </div>
-
-          {/* Interactive Range Slider */}
-          <div className="space-y-2 pt-1">
-            <div className="relative flex items-center">
-              <input
-                type="range"
-                min="40"
-                max="95"
-                step="5"
-                value={minMatchPercentage}
-                onChange={(e) => setMinMatchPercentage(Number(e.target.value))}
-                className="w-full h-2.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary focus:outline-hidden"
-              />
-            </div>
-
-            {/* Slider Scale Ticks */}
-            <div className="flex justify-between text-[11px] text-muted-foreground px-1 font-medium">
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {/* Slider input */}
+          <div className="space-y-3 pt-2">
+            <input
+              type="range"
+              min="40"
+              max="95"
+              step="5"
+              value={minMatchPercentage}
+              onChange={(e) => setMinMatchPercentage(Number(e.target.value))}
+              className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+            />
+            <div className="flex justify-between text-[11px] text-muted-foreground font-medium px-1">
               <span>40% (Broad)</span>
               <span>60%</span>
               <span>75% (Balanced)</span>
@@ -679,21 +867,20 @@ export default function JobAutomation() {
             </div>
           </div>
 
-          {/* Quick-Preset Filter Pills */}
-          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/40">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Quick Presets:</span>
+          {/* Preset Buttons */}
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/40">
+            <span className="text-xs text-muted-foreground font-medium mr-1">Presets:</span>
             {[
-              { label: 'All Jobs (40%+)', val: 40 },
-              { label: '60%+ Match', val: 60 },
-              { label: '75%+ Balanced', val: 75 },
-              { label: '85%+ High', val: 85 },
-              { label: '90%+ Top Match', val: 90 },
+              { label: 'All Openings (40%)', val: 40 },
+              { label: 'Good Fit (60%)', val: 60 },
+              { label: 'High Match (75%)', val: 75 },
+              { label: 'Top Tier Only (85%)', val: 85 },
             ].map(preset => (
               <button
                 key={preset.val}
                 type="button"
                 onClick={() => setMinMatchPercentage(preset.val)}
-                className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all ${
+                className={`text-xs px-3 py-1 rounded-md font-medium transition-colors ${
                   minMatchPercentage === preset.val
                     ? 'bg-primary text-primary-foreground shadow-xs'
                     : 'bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -707,7 +894,7 @@ export default function JobAutomation() {
       </Card>
 
       {/* =========================================================================
-          CONTAINER 3: JOB MATCHINGS CONTAINER (BELOW SKILLS & ADJUSTMENT BAR)
+          CONTAINER 3: JOB MATCHINGS CONTAINER
          ========================================================================= */}
       <Card className="border border-border/70 shadow-sm bg-card/60 backdrop-blur-sm">
         <CardHeader className="pb-4">
@@ -727,7 +914,7 @@ export default function JobAutomation() {
               </CardDescription>
             </div>
 
-            {/* "Apply All" Button (Controls all jobs in the Job Matching container) */}
+            {/* "Apply All" Button */}
             <div className="flex items-center gap-3">
               <Button
                 onClick={handleOpenApplyAllModal}
@@ -745,9 +932,7 @@ export default function JobAutomation() {
             </div>
           </div>
 
-          {/* ===================================================================
-              FEATURE 2: SMALL TAPS DISPLAYING THE NUMBER OF JOBS
-             =================================================================== */}
+          {/* Category Taps */}
           <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-border/60">
             <span className="text-xs text-muted-foreground font-medium flex items-center gap-1.5 mr-1">
               <Filter className="w-3.5 h-3.5 text-primary" />
@@ -779,12 +964,12 @@ export default function JobAutomation() {
               className={`text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-all ${
                 activeJobTap === '90plus'
                   ? 'bg-emerald-600 text-white shadow-sm font-semibold'
-                  : 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20'
+                  : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
               }`}
             >
               <span>90%+ Match</span>
               <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                activeJobTap === '90plus' ? 'bg-white/20 text-white' : 'bg-emerald-500/20 text-emerald-700'
+                activeJobTap === '90plus' ? 'bg-white/20 text-white' : 'bg-emerald-500/20 text-emerald-400'
               }`}>
                 {tapCounts.high}
               </span>
@@ -797,12 +982,12 @@ export default function JobAutomation() {
               className={`text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-all ${
                 activeJobTap === '80to89'
                   ? 'bg-blue-600 text-white shadow-sm font-semibold'
-                  : 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20'
+                  : 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'
               }`}
             >
               <span>80%-89% Match</span>
               <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                activeJobTap === '80to89' ? 'bg-white/20 text-white' : 'bg-blue-500/20 text-blue-700'
+                activeJobTap === '80to89' ? 'bg-white/20 text-white' : 'bg-blue-500/20 text-blue-400'
               }`}>
                 {tapCounts.medium}
               </span>
@@ -894,9 +1079,9 @@ export default function JobAutomation() {
                           <Badge 
                             className={`px-3 py-1 text-xs font-bold ${
                               isHighMatch
-                                ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
+                                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                                 : isMediumMatch
-                                ? 'bg-blue-500/15 text-blue-500 border-blue-500/30'
+                                ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
                                 : 'bg-primary/10 text-primary border-primary/20'
                             }`}
                           >
@@ -916,56 +1101,87 @@ export default function JobAutomation() {
                         <span>•</span>
                         <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{job.employment_type}</span>
                         <span>•</span>
-                        <span className="flex items-center gap-1 font-medium text-foreground"><DollarSign className="w-3 h-3 text-emerald-500" />{job.salary_range}</span>
+                        <span className="flex items-center gap-1 font-medium text-foreground"><DollarSign className="w-3 h-3 text-emerald-400" />{job.salary_range}</span>
                       </div>
 
-                      {/* Brief description snippet */}
-                      {job.description && (
-                        <p className="text-xs text-muted-foreground/90 line-clamp-2 pt-1">
-                          {job.description}
-                        </p>
+                      {/* Grounded Suitability Reasoning */}
+                      {job.suitability_reason && (
+                        <div className="text-[11px] text-muted-foreground bg-muted/40 p-2.5 rounded-md border border-border/50 space-y-1">
+                          <p className="leading-relaxed">
+                            <strong className="text-foreground font-medium">Why Suitable: </strong>
+                            {job.suitability_reason}
+                          </p>
+                        </div>
                       )}
 
                       {/* Matching Skills */}
                       {job.matching_skills.length > 0 && (
-                        <div className="space-y-1 pt-2">
+                        <div className="space-y-1 pt-1">
                           <span className="text-[11px] font-medium text-muted-foreground">Matching Skills:</span>
                           <div className="flex flex-wrap gap-1">
-                            {job.matching_skills.slice(0, 4).map((s, idx) => (
-                              <Badge key={idx} variant="outline" className="text-[10px] py-0 px-1.5 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                            {job.matching_skills.slice(0, 5).map((s, idx) => (
+                              <Badge key={idx} variant="outline" className="text-[10px] py-0 px-1.5 bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
                                 ✓ {s}
                               </Badge>
                             ))}
-                            {job.matching_skills.length > 4 && (
+                            {job.matching_skills.length > 5 && (
                               <span className="text-[10px] text-muted-foreground self-center">
-                                +{job.matching_skills.length - 4} more
+                                +{job.matching_skills.length - 5} more
                               </span>
                             )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Missing Required Skills */}
+                      {job.missing_skills.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          <span className="text-[11px] font-medium text-amber-400/90">Missing / Unverified Skills:</span>
+                          <div className="flex flex-wrap gap-1">
+                            {job.missing_skills.slice(0, 3).map((s, idx) => (
+                              <Badge key={idx} variant="outline" className="text-[10px] py-0 px-1.5 bg-amber-500/10 text-amber-400 border-amber-500/20">
+                                • {s}
+                              </Badge>
+                            ))}
                           </div>
                         </div>
                       )}
                     </div>
 
                     {/* Bottom Action Row */}
-                    <div className="pt-3 border-t border-border/50 flex items-center justify-between">
-                      {job.applied ? (
-                        <Badge className="bg-emerald-600 text-white font-medium flex items-center gap-1 text-xs py-1 px-3">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Applied
-                        </Badge>
-                      ) : (
+                    <div className="pt-3 border-t border-border/50 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {/* Optimize Resume Button */}
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleApplySingle(job.id)}
-                          className="text-xs hover:bg-primary hover:text-primary-foreground font-medium"
+                          onClick={() => handleOpenOptimizeModal(job)}
+                          className="text-xs flex items-center gap-1.5 border-primary/30 text-primary hover:bg-primary/10"
                         >
-                          Apply Single
+                          <Sparkles className="w-3.5 h-3.5 text-primary" />
+                          <span>Optimize Resume</span>
                         </Button>
-                      )}
 
-                      <span className="text-[11px] text-muted-foreground">
-                        Verified Position
+                        {/* Apply Single Button */}
+                        {job.applied ? (
+                          <Badge className="bg-emerald-600 text-white font-medium flex items-center gap-1 text-xs py-1 px-3">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Applied
+                          </Badge>
+                        ) : (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handleApplySingle(job.id)}
+                            className="text-xs font-medium"
+                          >
+                            Apply Single
+                          </Button>
+                        )}
+                      </div>
+
+                      <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                        Verified Vacancy
                       </span>
                     </div>
                   </div>
@@ -992,7 +1208,6 @@ export default function JobAutomation() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* Client Profile Details Section with Editable Inputs to fix any mismatch */}
             <div className="p-4 rounded-xl bg-muted/50 border border-border space-y-3">
               <div className="flex items-center justify-between border-b border-border/60 pb-2">
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
@@ -1020,7 +1235,7 @@ export default function JobAutomation() {
                   <Input
                     value={clientEmail}
                     onChange={(e) => setClientEmail(e.target.value)}
-                    placeholder="email@example.com"
+                    placeholder="Candidate Email"
                     className="h-8 text-xs bg-background"
                   />
                 </div>
@@ -1030,56 +1245,36 @@ export default function JobAutomation() {
                   <Input
                     value={clientPhone}
                     onChange={(e) => setClientPhone(e.target.value)}
-                    placeholder="+1 (555) 000-0000"
+                    placeholder="Phone number"
                     className="h-8 text-xs bg-background"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1 flex items-center justify-between">
-                    <span>Total Experience</span>
-                    <Badge variant="outline" className="text-[9px] py-0 px-1 text-emerald-600 border-emerald-500/30">
-                      Calculated from Resume
-                    </Badge>
-                  </label>
+                  <label className="text-xs text-muted-foreground block mb-1">Verified Experience</label>
                   <Input
                     value={clientExperience}
                     onChange={(e) => setClientExperience(e.target.value)}
-                    placeholder="e.g. 5+ years (2019 - 2024)"
-                    className="h-8 text-xs font-medium bg-background"
+                    placeholder="e.g. 2+ years"
+                    className="h-8 text-xs bg-background font-medium text-primary"
                   />
                 </div>
               </div>
-
-              {resumeFile && (
-                <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Source Resume Document:</span>
-                  <span className="font-medium text-foreground flex items-center gap-1">
-                    <FileText className="w-3 h-3 text-primary" />
-                    {resumeFile.name} ({(resumeFile.size / 1024).toFixed(1)} KB)
-                  </span>
-                </div>
-              )}
             </div>
 
-            {/* Jobs Acceptance Summary */}
-            <div className="p-4 rounded-xl bg-primary/[0.04] border border-primary/20 space-y-2.5">
-              <div className="flex items-center justify-between text-xs font-semibold text-foreground">
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                  Positions to Apply ({unappliedDisplayedJobs.length} Jobs in current view)
-                </span>
-                <span className="text-primary font-bold">Accept & Apply</span>
-              </div>
-
-              <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                {unappliedDisplayedJobs.map((j, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-xs p-2 rounded-md bg-background/80 border border-border/60">
-                    <div className="truncate pr-2">
-                      <span className="font-medium text-foreground">{j.title}</span>
+            {/* Targeted Positions Preview */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Targeted Positions ({unappliedDisplayedJobs.length} Positions)
+              </h4>
+              <div className="max-h-48 overflow-y-auto space-y-2 border border-border/60 rounded-xl p-3 bg-background/50">
+                {unappliedDisplayedJobs.map(j => (
+                  <div key={j.id} className="flex items-center justify-between text-xs py-1.5 px-2 rounded-lg bg-muted/40">
+                    <div>
+                      <span className="font-medium text-foreground block">{j.title}</span>
                       <span className="text-muted-foreground text-[11px] block">{j.company} • {j.location}</span>
                     </div>
-                    <Badge variant="outline" className="text-[10px] shrink-0 bg-emerald-500/10 text-emerald-600 border-emerald-500/30 font-bold">
+                    <Badge variant="outline" className="text-[10px] shrink-0 bg-emerald-500/10 text-emerald-400 border-emerald-500/30 font-bold">
                       {j.match_percentage}%
                     </Badge>
                   </div>
@@ -1112,6 +1307,153 @@ export default function JobAutomation() {
                   Confirm & Apply {unappliedDisplayedJobs.length} Jobs
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* =========================================================================
+          MODAL: RESUME OPTIMIZATION FOR TARGET JOB
+         ========================================================================= */}
+      <Dialog open={showOptimizeModal} onOpenChange={setShowOptimizeModal}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+              <Sparkles className="w-5 h-5 text-primary" />
+              Tailored Resume Optimization
+            </DialogTitle>
+            <DialogDescription>
+              {optimizingJob ? `${optimizingJob.title} at ${optimizingJob.company}` : 'Target Job Position'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {isOptimizing ? (
+            <div className="py-12 flex flex-col items-center justify-center space-y-3 text-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <h4 className="text-sm font-semibold text-foreground">Analyzing Job Description & Candidate Resume...</h4>
+              <p className="text-xs text-muted-foreground max-w-md">
+                Formulating ATS keywords, bullet point enhancements, and project framing recommendations with Google Gemini AI.
+              </p>
+            </div>
+          ) : optimizationData ? (
+            <div className="space-y-5 py-2">
+              {/* Section 1: Missing Keywords */}
+              {optimizationData.missing_keywords && optimizationData.missing_keywords.length > 0 && (
+                <div className="p-4 rounded-xl bg-muted/40 border border-border/80 space-y-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                    <ListChecks className="w-4 h-4 text-primary" />
+                    Recommended Keywords for this Position
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Adding these keywords where you have relevant experience will help your resume pass recruiter filters:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {optimizationData.missing_keywords.map((kw, i) => (
+                      <Badge key={i} variant="outline" className="text-xs py-1 px-2.5 bg-primary/10 text-primary border-primary/25">
+                        + {kw}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Section 2: Bullet Point Improvements */}
+              {optimizationData.bullet_point_improvements && optimizationData.bullet_point_improvements.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    Action-Oriented Bullet Point Rewrites
+                  </h4>
+                  <div className="space-y-3">
+                    {optimizationData.bullet_point_improvements.map((bp, i) => (
+                      <div key={i} className="p-3.5 rounded-lg border border-border/70 bg-background/50 space-y-2 text-xs">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Original:</span>
+                          <p className="text-muted-foreground italic bg-muted/30 p-2 rounded border border-border/40">
+                            "{bp.original}"
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Suggested Action Rewrite:</span>
+                          <p className="text-foreground font-medium bg-emerald-500/10 text-emerald-300 p-2 rounded border border-emerald-500/20">
+                            {bp.improved}
+                          </p>
+                        </div>
+                        {bp.rationale && (
+                          <p className="text-[11px] text-muted-foreground">
+                            <strong className="text-foreground">Why: </strong>
+                            {bp.rationale}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Section 3: Project Framing */}
+              {optimizationData.project_descriptions && optimizationData.project_descriptions.length > 0 && (
+                <div className="p-4 rounded-xl bg-muted/40 border border-border/80 space-y-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Briefcase className="w-4 h-4 text-primary" />
+                    Project Alignment Suggestions
+                  </h4>
+                  <div className="space-y-2 text-xs">
+                    {optimizationData.project_descriptions.map((proj, i) => (
+                      <div key={i} className="space-y-1">
+                        <span className="font-semibold text-foreground">{proj.project_name}:</span>
+                        <p className="text-muted-foreground">{proj.suggestions}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Section 4: Tailored Professional Summary */}
+              {optimizationData.tailored_professional_summary && (
+                <div className="p-4 rounded-xl bg-muted/40 border border-border/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <FileText className="w-4 h-4 text-primary" />
+                      Tailored Professional Summary
+                    </h4>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleCopySummary(optimizationData.tailored_professional_summary)}
+                      className="text-xs h-7 flex items-center gap-1"
+                    >
+                      {copiedSummary ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedSummary ? 'Copied' : 'Copy Summary'}</span>
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed bg-background/60 p-3 rounded-lg border border-border/60">
+                    {optimizationData.tailored_professional_summary}
+                  </p>
+                </div>
+              )}
+
+              {/* Section 5: Formatting Recommendations */}
+              {optimizationData.formatting_recommendations && optimizationData.formatting_recommendations.length > 0 && (
+                <div className="p-3.5 rounded-lg border border-border/60 bg-background/40 space-y-1.5 text-xs">
+                  <h5 className="font-semibold text-foreground text-[11px] uppercase tracking-wider">Formatting & ATS Advice:</h5>
+                  <ul className="list-disc list-inside text-muted-foreground space-y-0.5 text-[11px]">
+                    {optimizationData.formatting_recommendations.map((rec, i) => (
+                      <li key={i}>{rec}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-xs text-muted-foreground">
+              No optimization data available.
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowOptimizeModal(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

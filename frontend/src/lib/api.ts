@@ -231,6 +231,15 @@ export const API_ENDPOINTS = {
     apiKeys: '/auth/me',
   },
 
+  // Notifications
+  notifications: {
+    list: '/api/user/notifications',
+    markRead: (id: string | number) => `/api/user/notifications/${id}/read`,
+    markAllRead: '/api/user/notifications/mark-all-read',
+    clearAll: '/api/user/notifications',
+    delete: (id: string | number) => `/api/user/notifications/${id}`,
+  },
+
 
   // Agent control
   agent: {

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 import docx
 from pypdf import PdfReader
 from backend.database.connection import get_db
-from backend.database.models_complete import JobPosting, JobApplication, User, AuditLog
+from backend.database.models_complete import JobPosting, JobApplication, User, AuditLog, Resume
 from backend.llm.gemini_service import get_gemini_service
 from backend.auth.dependencies import get_current_user, get_current_user_optional
 
@@ -49,42 +49,49 @@ def _temp_upload_path(upload_dir: str, filename: str | None) -> str:
 
 
 def extract_text_from_pdf(file_path: str) -> str:
-    """Extract text from PDF file"""
-    # 1) Try PyPDF2 first (fastest, already a dependency)
+    """Extract text from PDF file and detect scanned/image-only documents."""
+    text_parts: list[str] = []
+    page_count = 0
+    file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+
+    # 1) Try PyPDF / pypdf first
     try:
-        text_parts: list[str] = []
         with open(file_path, "rb") as f:
             reader = PdfReader(f)
+            page_count = len(reader.pages)
             for page in reader.pages:
                 page_text = page.extract_text() or ""
                 if page_text:
                     text_parts.append(page_text)
         text = "\n".join(text_parts).strip()
-        if text:
+        if len(text) >= 30:
             return text
     except Exception:
-        # Fall back to pdfminer.six below
         pass
 
-    # 2) Fallback to pdfminer.six for tricky/malformed PDFs
+    # 2) Fallback to pdfminer.six for complex PDFs
     try:
         from pdfminer.high_level import extract_text as pdfminer_extract_text
-    except Exception as e:  # pragma: no cover
+        text = (pdfminer_extract_text(file_path) or "").strip()
+        if len(text) >= 30:
+            return text
+    except Exception:
+        pass
+
+    # 3) Check if it is a scanned or image-only PDF
+    if page_count > 0 or file_size > 3000:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Failed to parse PDF with PyPDF2 and pdfminer.six is unavailable. "
-                f"Original import error: {str(e)}"
+                "Scanned or image-only PDF detected. Could not extract selectable text. "
+                "Please upload a searchable text-based PDF, DOCX, or TXT document, or perform OCR before uploading."
             ),
         )
 
-    try:
-        text = (pdfminer_extract_text(file_path) or "").strip()
-        if not text:
-            raise ValueError("No extractable text found in PDF")
-        return text
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {str(e)}")
+    raise HTTPException(
+        status_code=400,
+        detail="The uploaded PDF is empty or could not be read. Please upload a valid resume file."
+    )
 
 
 def extract_text_from_docx(file_path: str) -> str:
@@ -704,10 +711,71 @@ async def parse_resume(
                 },
             ]
 
-        # Calculate matching jobs with matching percentages
-        matched_jobs = gemini_service.match_candidate_against_jobs(all_skills, platform_jobs)
+        # Calculate matching jobs grounded in real vacancies and candidate experience
+        matched_jobs = gemini_service.match_candidate_against_jobs(
+            candidate_skills=all_skills,
+            jobs=platform_jobs,
+            candidate_experience=analysis.get("total_experience"),
+            resume_text=resume_text
+        )
 
-        # 7. Clean up temporary upload
+        # 7. Persist to authenticated candidate's account (Account Isolation)
+        saved_resume_id = None
+        if current_user:
+            try:
+                permanent_filename = f"{current_user.id}_{file.filename}"
+                permanent_path = os.path.join(upload_dir, permanent_filename)
+
+                with open(permanent_path, "wb") as pf:
+                    pf.write(content)
+
+                # Deactivate older resumes for this candidate
+                db.query(Resume).filter(
+                    Resume.user_id == current_user.id,
+                    Resume.is_active == True
+                ).update({"is_active": False})
+
+                # Create new Resume record
+                file_ext = filename.split(".")[-1]
+                new_resume = Resume(
+                    user_id=current_user.id,
+                    filename=file.filename,
+                    file_path=permanent_path,
+                    file_size_bytes=len(content),
+                    file_type=file_ext,
+                    raw_text=resume_text,
+                    parsed_data=analysis,
+                    full_name=analysis.get("candidate_name") or current_user.full_name,
+                    email=analysis.get("email") or current_user.email,
+                    phone=analysis.get("phone") or current_user.phone,
+                    location=analysis.get("location") or current_user.location,
+                    summary=analysis.get("professional_summary"),
+                    skills=all_skills,
+                    skill_categories=analysis.get("skills", {}),
+                    experience=analysis.get("employment_history", []),
+                    education=analysis.get("education", []),
+                    certifications=analysis.get("certifications", []),
+                    storage_url=f"/api/recruiter/files/{permanent_filename}",
+                    is_active=True,
+                )
+                db.add(new_resume)
+
+                # Update candidate user record
+                if all_skills:
+                    current_user.default_skills = all_skills
+                if analysis.get("candidate_name") and not current_user.full_name:
+                    current_user.full_name = analysis.get("candidate_name")
+                if analysis.get("phone") and not current_user.phone:
+                    current_user.phone = analysis.get("phone")
+
+                db.commit()
+                db.refresh(new_resume)
+                saved_resume_id = new_resume.id
+            except Exception as persist_err:
+                db.rollback()
+                print(f"[ATS] Error persisting resume to user account: {persist_err}")
+
+        # 8. Clean up temporary upload file
         if os.path.exists(file_path):
             os.remove(file_path)
 
@@ -716,9 +784,11 @@ async def parse_resume(
             "ai_powered": analysis.get("ai_powered", False),
             "model_used": analysis.get("model_used"),
             "config_message": analysis.get("config_message"),
+            "resume_id": saved_resume_id,
             "candidate_name": analysis.get("candidate_name") or "Candidate",
             "email": analysis.get("email") or "",
             "phone": analysis.get("phone") or "",
+            "location": analysis.get("location"),
             "professional_summary": analysis.get("professional_summary") or "",
             "total_experience": analysis.get("total_experience") or "Experience inferred",
             "skills": {
@@ -735,11 +805,13 @@ async def parse_resume(
             "missing_skills": analysis.get("missing_skills", []),
             "career_highlights": analysis.get("career_highlights", []),
             "suggested_improvements": analysis.get("suggested_improvements", []),
+            "facts_vs_inferences": analysis.get("facts_vs_inferences", {"explicit_facts": [], "inferences": []}),
             "keywords": analysis.get("keywords", []),
             "job_match": analysis.get("job_match", {}),
             "matched_jobs": matched_jobs,
             "text": resume_text,
             "length": len(resume_text),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
             "parsed_data": {
                 "contact": {
                     "name": analysis.get("candidate_name"),
@@ -762,6 +834,192 @@ async def parse_resume(
             os.remove(file_path)
         print(f"[ATS] Error parsing resume: {e}")
         raise HTTPException(status_code=500, detail=f"Resume processing error: {str(e)}")
+
+
+class OptimizeResumeRequest(BaseModel):
+    job_id: Union[int, str]
+    resume_id: Optional[int] = None
+    custom_resume_text: Optional[str] = None
+
+
+@router.post("/optimize-resume")
+async def optimize_resume(
+    body: OptimizeResumeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate tailored resume optimization suggestions for a specific job from the database.
+    Requires authenticated user and enforces strict account isolation.
+    """
+    # 1. Fetch real target job from database
+    try:
+        job_id_int = int(body.job_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
+
+    job = db.query(JobPosting).filter(JobPosting.id == job_id_int).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Target job vacancy not found in database.")
+
+    # 2. Retrieve candidate's actual resume text
+    resume_text = ""
+
+    if body.resume_id:
+        resume = db.query(Resume).filter(
+            Resume.id == body.resume_id,
+            Resume.user_id == current_user.id
+        ).first()
+        if not resume:
+            raise HTTPException(status_code=403, detail="Resume record not found or access denied.")
+        resume_text = resume.raw_text or ""
+        if not resume_text and resume.file_path and os.path.exists(resume.file_path):
+            if resume.file_path.endswith(".pdf"):
+                resume_text = extract_text_from_pdf(resume.file_path)
+            elif resume.file_path.endswith(".docx"):
+                resume_text = extract_text_from_docx(resume.file_path)
+
+    if not resume_text:
+        # Check candidate's latest active resume in DB
+        latest_resume = (
+            db.query(Resume)
+            .filter(Resume.user_id == current_user.id, Resume.is_active == True)
+            .order_by(Resume.id.desc())
+            .first()
+        )
+        if not latest_resume:
+            latest_resume = (
+                db.query(Resume)
+                .filter(Resume.user_id == current_user.id)
+                .order_by(Resume.id.desc())
+                .first()
+            )
+
+        if latest_resume:
+            resume_text = latest_resume.raw_text or ""
+            if not resume_text and latest_resume.file_path and os.path.exists(latest_resume.file_path):
+                if latest_resume.file_path.endswith(".pdf"):
+                    resume_text = extract_text_from_pdf(latest_resume.file_path)
+                elif latest_resume.file_path.endswith(".docx"):
+                    resume_text = extract_text_from_docx(latest_resume.file_path)
+
+    if not resume_text and body.custom_resume_text:
+        resume_text = body.custom_resume_text.strip()
+
+    if not resume_text or len(resume_text.strip()) < 30:
+        raise HTTPException(
+            status_code=400,
+            detail="No resume text available to optimize. Please upload or parse a resume first."
+        )
+
+    # 3. Execute Gemini Resume Optimization
+    gemini_service = get_gemini_service()
+    result = gemini_service.optimize_resume_for_job(
+        resume_text=resume_text,
+        job_title=job.title,
+        job_company=job.company_name or "Partner Organization",
+        job_description=job.description or "",
+        job_skills=job.skills or ""
+    )
+
+    return result
+
+
+@router.get("/current-profile")
+def get_current_ats_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get the authenticated candidate's active resume intelligence and database matched jobs.
+    """
+    latest_resume = (
+        db.query(Resume)
+        .filter(Resume.user_id == current_user.id, Resume.is_active == True)
+        .order_by(Resume.id.desc())
+        .first()
+    )
+    if not latest_resume:
+        latest_resume = (
+            db.query(Resume)
+            .filter(Resume.user_id == current_user.id)
+            .order_by(Resume.id.desc())
+            .first()
+        )
+    if not latest_resume:
+        return {"has_profile": False}
+
+    parsed = latest_resume.parsed_data or {}
+    skills_obj = parsed.get("skills", {})
+    if isinstance(skills_obj, dict):
+        tech_skills = skills_obj.get("technical", [])
+        prof_skills = skills_obj.get("professional", [])
+        domain_skills = skills_obj.get("domain", [])
+    else:
+        tech_skills = latest_resume.skills or []
+        prof_skills = []
+        domain_skills = []
+
+    all_skills = list(dict.fromkeys(tech_skills + prof_skills + domain_skills))
+    if not all_skills and latest_resume.skills:
+        all_skills = latest_resume.skills
+
+    # Match real approved jobs
+    platform_jobs = []
+    try:
+        db_jobs = db.query(JobPosting).filter(JobPosting.status == "approved").all()
+        for j in db_jobs:
+            platform_jobs.append({
+                "id": j.id,
+                "title": j.title,
+                "company_name": j.company_name,
+                "location": j.location,
+                "salary_description": j.salary_description,
+                "job_type": j.job_type,
+                "skills": j.skills or "",
+                "description": j.description or "",
+            })
+    except Exception:
+        pass
+
+    gemini_svc = get_gemini_service()
+    matched_jobs = gemini_svc.match_candidate_against_jobs(
+        candidate_skills=all_skills,
+        jobs=platform_jobs,
+        candidate_experience=parsed.get("total_experience") or f"{latest_resume.years_of_experience or 1}+ years",
+        resume_text=latest_resume.raw_text or ""
+    )
+
+    return {
+        "has_profile": True,
+        "resume_id": latest_resume.id,
+        "resume_filename": latest_resume.filename,
+        "candidate_name": latest_resume.full_name or current_user.full_name or "Candidate",
+        "email": latest_resume.email or current_user.email or "",
+        "phone": latest_resume.phone or current_user.phone or "",
+        "location": latest_resume.location or current_user.location or "Remote",
+        "professional_summary": latest_resume.summary or parsed.get("professional_summary") or "",
+        "total_experience": parsed.get("total_experience") or "Fresher / Entry-Level (0-1 year)",
+        "skills": {
+            "technical": tech_skills,
+            "professional": prof_skills,
+            "domain": domain_skills,
+        },
+        "all_skills": all_skills,
+        "education": parsed.get("education", latest_resume.education or []),
+        "certifications": parsed.get("certifications", latest_resume.certifications or []),
+        "employment_history": parsed.get("employment_history", latest_resume.experience or []),
+        "key_projects": parsed.get("key_projects", []),
+        "strengths": parsed.get("strengths", []),
+        "missing_skills": parsed.get("missing_skills", []),
+        "career_highlights": parsed.get("career_highlights", []),
+        "suggested_improvements": parsed.get("suggested_improvements", []),
+        "facts_vs_inferences": parsed.get("facts_vs_inferences", {"explicit_facts": [], "inferences": []}),
+        "ai_powered": parsed.get("ai_powered", True),
+        "model_used": parsed.get("model_used") or gemini_svc.model_name,
+        "matched_jobs": matched_jobs,
+        "last_updated": latest_resume.updated_at.isoformat() if latest_resume.updated_at else None,
+    }
 
 
 

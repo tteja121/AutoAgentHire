@@ -15,9 +15,9 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from backend.database.connection import get_db
-from backend.database.crud import UserRepository, ResumeRepository
+from backend.database.crud import UserRepository, ResumeRepository, NotificationRepository
 from backend.auth.dependencies import get_current_user, get_current_user_optional
-from backend.database.models_complete import User, JobApplication, JobPosting, Application, Resume, AuditLog
+from backend.database.models_complete import User, JobApplication, JobPosting, Application, Resume, AuditLog, Notification
 from backend.auth.validators import validate_email_format, validate_phone_number
 
 logger = logging.getLogger(__name__)
@@ -335,6 +335,8 @@ async def upload_resume(
         target_user = db.query(User).filter(User.role == "candidate").first()
     if not target_user:
         target_user = db.query(User).first()
+    if not target_user:
+        raise HTTPException(400, "User account required for resume upload.")
 
     try:
         # Save file to disk
@@ -920,6 +922,144 @@ def get_user_profile(
         "approval_status": getattr(current_user, "approval_status", "approved"),
         "custom_user_id": getattr(current_user, "custom_user_id", None),
         "created_at": str(current_user.created_at),
+    }
+
+
+# ── In-App Notifications (Account-Isolated) ───────────────────────────────────
+
+def _format_time_ago(dt: Any) -> str:
+    if not dt:
+        return "Just now"
+    now = datetime.now(timezone.utc)
+    if hasattr(dt, "tzinfo") and dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    diff = now - dt
+    seconds = diff.total_seconds()
+    if seconds < 60:
+        return "Just now"
+    elif seconds < 3600:
+        mins = max(1, int(seconds // 60))
+        return f"{mins}m ago"
+    elif seconds < 86400:
+        hours = max(1, int(seconds // 3600))
+        return f"{hours}h ago"
+    elif seconds < 172800:
+        return "Yesterday"
+    else:
+        days = int(seconds // 86400)
+        return f"{days}d ago"
+
+
+@router.get("/user/notifications")
+def get_user_notifications(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get all in-app notifications for the logged-in user with strict account isolation.
+    Automatically seeds initial default notifications if the tray is empty.
+    """
+    user_id = int(getattr(current_user, "id", 0))
+    NotificationRepository.seed_initial_if_empty(db, user_id)
+    notifs = NotificationRepository.get_for_user(db, user_id, limit=50)
+
+    serialized = [
+        {
+            "id": str(n.id),
+            "uuid": n.uuid,
+            "title": n.title,
+            "message": n.message,
+            "time": _format_time_ago(n.created_at),
+            "read": bool(n.is_read),
+            "type": n.type or "system",
+            "actionHref": n.action_href,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in notifs
+    ]
+    unread_count = sum(1 for n in serialized if not n["read"])
+
+    return {
+        "notifications": serialized,
+        "unread_count": unread_count,
+        "total": len(serialized),
+    }
+
+
+@router.post("/user/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently mark a notification as read in the database.
+    Enforces account isolation: only the notification owner can mark it read.
+    """
+    user_id = int(getattr(current_user, "id", 0))
+    notif = NotificationRepository.mark_as_read(db, notification_id, user_id)
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found or access denied")
+    
+    return {
+        "success": True,
+        "id": str(notif.id),
+        "read": True,
+        "unread_count": NotificationRepository.count_unread(db, user_id),
+    }
+
+
+@router.post("/user/notifications/mark-all-read")
+def mark_all_notifications_read(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently mark all unread notifications as read for the logged-in user.
+    """
+    user_id = int(getattr(current_user, "id", 0))
+    updated_count = NotificationRepository.mark_all_as_read(db, user_id)
+    return {
+        "success": True,
+        "updated_count": updated_count,
+        "unread_count": 0,
+    }
+
+
+@router.delete("/user/notifications")
+def clear_all_user_notifications(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Clear all notifications for the logged-in user.
+    """
+    user_id = int(getattr(current_user, "id", 0))
+    cleared_count = NotificationRepository.clear_all(db, user_id)
+    return {
+        "success": True,
+        "cleared_count": cleared_count,
+        "unread_count": 0,
+    }
+
+
+@router.delete("/user/notifications/{notification_id}")
+def delete_single_user_notification(
+    notification_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete a single notification by id/uuid, restricted to the logged-in user.
+    """
+    user_id = int(getattr(current_user, "id", 0))
+    deleted = NotificationRepository.delete_by_identifier(db, notification_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Notification not found or access denied")
+    return {
+        "success": True,
+        "id": notification_id,
+        "unread_count": NotificationRepository.count_unread(db, user_id),
     }
 
 

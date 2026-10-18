@@ -8,10 +8,10 @@ from typing import List, Optional, Any, Set
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
-# Resolve .env from backend directory and project root
+# Resolve .env from backend directory and project root (backend/.env has higher priority)
 _backend_env = Path(__file__).resolve().parent / ".env"
 _root_env = Path(__file__).resolve().parent.parent / ".env"
-_ENV_FILES = [str(p) for p in [_root_env, _backend_env] if p.exists()]
+_ENV_FILES = [str(p) for p in [_backend_env, _root_env] if p.exists()]
 
 KNOWN_INSECURE_SECRETS: Set[str] = {
     "Zf9XeUbaW1GqoXvT9WZfOoMA2ZcjwpcmAybvkWLpBb8",
@@ -212,6 +212,7 @@ class Settings(BaseSettings):
     # Optional fields present in .env but not strictly required
     LLAMA_MODEL_PATH: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-flash-latest"
     GROQ_API_KEY: Optional[str] = None
     GITHUB_API_KEY: Optional[str] = None
     QDRANT_URL: Optional[str] = None

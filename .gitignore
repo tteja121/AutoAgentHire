@@ -174,3 +174,7 @@ backend/browser_profile/
 # ── Task Queues (Celery) ──────────────────────────────────────────────────────
 celerybeat-schedule
 celerybeat.pid
+# Scratch and Demo files
+scratch/
+demo/
+*.webm

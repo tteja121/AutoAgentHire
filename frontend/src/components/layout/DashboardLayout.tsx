@@ -74,7 +74,40 @@ export const DashboardLayout = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(defaultNotifications);
+  // Helpers for instantaneous localStorage hydration of read status
+  const getCachedReadIds = (): Set<string> => {
+    try {
+      const stored = localStorage.getItem("read_notification_ids");
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
+  };
+
+  const addCachedReadId = (id: string) => {
+    try {
+      const set = getCachedReadIds();
+      set.add(String(id));
+      localStorage.setItem("read_notification_ids", JSON.stringify(Array.from(set)));
+    } catch (e) {
+      console.warn("Could not cache read notification id:", e);
+    }
+  };
+
+  const addCachedReadIds = (ids: string[]) => {
+    try {
+      const set = getCachedReadIds();
+      ids.forEach((id) => set.add(String(id)));
+      localStorage.setItem("read_notification_ids", JSON.stringify(Array.from(set)));
+    } catch (e) {
+      console.warn("Could not cache read notification ids:", e);
+    }
+  };
+
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
+    const cached = getCachedReadIds();
+    return defaultNotifications.map((n) => (cached.has(n.id) ? { ...n, read: true } : n));
+  });
   const [currentUser, setCurrentUser] = useState<any>(null);
 
   const location = useLocation();
@@ -82,6 +115,37 @@ export const DashboardLayout = () => {
 
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+
+  // Fetch persistent notifications from backend database
+  const loadNotifications = async () => {
+    try {
+      const resp = await apiClient.get(API_ENDPOINTS.notifications.list);
+      const serverNotifs = resp.data?.notifications || (Array.isArray(resp.data) ? resp.data : []);
+      if (Array.isArray(serverNotifs) && serverNotifs.length > 0) {
+        const cached = getCachedReadIds();
+        const mapped: NotificationItem[] = serverNotifs.map((item: any) => {
+          const isRead = Boolean(item.read || cached.has(String(item.id)) || (item.uuid && cached.has(String(item.uuid))));
+          return {
+            id: String(item.id),
+            title: item.title,
+            message: item.message,
+            time: item.time || "New",
+            read: isRead,
+            type: item.type || "system",
+            actionHref: item.actionHref || item.action_href,
+          };
+        });
+        setNotifications(mapped);
+      }
+    } catch (err) {
+      console.warn("Could not load backend notifications:", err);
+    }
+  };
+
+  // Initial load of backend notifications
+  useEffect(() => {
+    loadNotifications();
+  }, []);
 
   // Fetch current user details
   useEffect(() => {
@@ -127,15 +191,19 @@ export const DashboardLayout = () => {
         const resp = await apiClient.get(API_ENDPOINTS.recruiter.candidateJobs);
         const jobs = resp.data || [];
         if (Array.isArray(jobs) && jobs.length > 0 && isMounted) {
-          const jobNotifs: NotificationItem[] = jobs.slice(0, 5).map((job: any, idx: number) => ({
-            id: `job-post-notif-${job.id || idx}`,
-            title: `New Job Opportunity: ${job.title}`,
-            message: `${job.company_name} uploaded a verified job opening (${job.vacancies || 1} vacancy - ${job.job_type || 'Full-time'} in ${job.location || 'Remote'}). Tap to explore & apply.`,
-            time: "New",
-            read: false,
-            type: "job",
-            actionHref: "/candidate/jobs",
-          }));
+          const cached = getCachedReadIds();
+          const jobNotifs: NotificationItem[] = jobs.slice(0, 5).map((job: any, idx: number) => {
+            const id = `job-post-notif-${job.id || idx}`;
+            return {
+              id,
+              title: `New Job Opportunity: ${job.title}`,
+              message: `${job.company_name} uploaded a verified job opening (${job.vacancies || 1} vacancy - ${job.job_type || 'Full-time'} in ${job.location || 'Remote'}). Tap to explore & apply.`,
+              time: "New",
+              read: cached.has(id),
+              type: "job",
+              actionHref: "/candidate/jobs",
+            };
+          });
 
           setNotifications(prev => {
             const incomingIds = new Set(jobNotifs.map(j => j.id));
@@ -152,6 +220,7 @@ export const DashboardLayout = () => {
 
     const handleJobUpdate = () => {
       loadJobNotifications();
+      loadNotifications();
     };
     window.addEventListener("jobPostingsUpdated", handleJobUpdate);
     window.addEventListener("applicationSubmitted", handleJobUpdate);
@@ -185,18 +254,43 @@ export const DashboardLayout = () => {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  const markAllAsRead = () => {
+  const markAllAsRead = async () => {
+    // 1. Instant optimistic state update
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    // 2. Cache in localStorage
+    addCachedReadIds(notifications.map((n) => n.id));
+    // 3. Persist to backend database
+    try {
+      await apiClient.post(API_ENDPOINTS.notifications.markAllRead);
+    } catch (err) {
+      console.warn("Could not persist mark-all-read to backend:", err);
+    }
   };
 
-  const clearAllNotifications = () => {
+  const clearAllNotifications = async () => {
+    // 1. Instant optimistic state update
     setNotifications([]);
+    // 2. Clear backend database
+    try {
+      await apiClient.delete(API_ENDPOINTS.notifications.clearAll);
+    } catch (err) {
+      console.warn("Could not clear notifications on backend:", err);
+    }
   };
 
-  const markSingleAsRead = (id: string) => {
+  const markSingleAsRead = async (id: string) => {
+    // 1. Instant optimistic state update
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
+    // 2. Cache in localStorage for immediate hydration
+    addCachedReadId(id);
+    // 3. Persist to backend database
+    try {
+      await apiClient.post(API_ENDPOINTS.notifications.markRead(id));
+    } catch (err) {
+      console.warn("Could not persist notification read status to backend:", err);
+    }
   };
 
   const getUserInitials = () => {
@@ -272,18 +366,6 @@ export const DashboardLayout = () => {
             );
           })}
         </nav>
-
-
-        {/* Logout */}
-        <div className="p-4 border-t border-white/5">
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all text-left"
-          >
-            <LogOut className="w-5 h-5 flex-shrink-0" />
-            {sidebarOpen && <span className="font-medium text-sm">Logout</span>}
-          </button>
-        </div>
       </aside>
 
       {/* Mobile sidebar */}

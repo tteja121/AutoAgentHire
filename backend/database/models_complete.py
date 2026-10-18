@@ -101,6 +101,7 @@ class User(Base):
     # Relationships
     resumes = relationship("Resume", back_populates="user", cascade="all, delete-orphan")
     agent_runs = relationship("AgentRun", back_populates="user", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
     job_postings = relationship(
         "JobPosting",
         primaryjoin="User.id==JobPosting.recruiter_id",
@@ -711,5 +712,28 @@ class AuditLog(Base):
     details = Column(JSONB, default={})
     ip_address = Column(String(45))
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE 12: In-App User Notifications (Read status persistence & account isolation)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class Notification(Base):
+    """In-app notifications for candidates, recruiters, and authorizers"""
+    __tablename__ = 'notifications'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    type = Column(String(50), default='system')  # 'job', 'ats', 'application', 'system'
+    action_href = Column(String(255), nullable=True)
+    is_read = Column(Boolean, default=False, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="notifications")
 
 

@@ -25,7 +25,8 @@ from backend.database.models_complete import (
     AgentLog,
     JobCache,
     FileStorage,
-    AnalyticsEvent
+    AnalyticsEvent,
+    Notification
 )
 
 # CRUD Repositories
@@ -37,7 +38,8 @@ from backend.database.crud import (
     AgentLogRepository,
     JobCacheRepository,
     FileStorageRepository,
-    AnalyticsRepository
+    AnalyticsRepository,
+    NotificationRepository
 )
 
 # Vector Store (optional - torch may not be compatible with current Python version)

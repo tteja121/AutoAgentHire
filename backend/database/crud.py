@@ -13,7 +13,8 @@ from sqlalchemy import desc, asc, and_, or_
 
 from backend.database.models_complete import (
     User, Resume, AgentRun, Application, 
-    AgentLog, JobCache, FileStorage, AnalyticsEvent
+    AgentLog, JobCache, FileStorage, AnalyticsEvent,
+    Notification
 )
 
 
@@ -667,3 +668,161 @@ def create_resume(db: Session, user_id: int, resume_dict: dict):
         file_type=resume_dict.get("file_type", "pdf"),
         **{k: v for k, v in resume_dict.items() if k not in ("filename", "file_path", "file_size_bytes", "file_type")},
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Notification CRUD Operations (Account-Isolated)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class NotificationRepository:
+    """Repository for in-app user notifications with strict user-level isolation."""
+
+    @staticmethod
+    def get_for_user(db: Session, user_id: int, limit: int = 50) -> List[Notification]:
+        """Get all notifications belonging strictly to the user, ordered by creation date."""
+        return (
+            db.query(Notification)
+            .filter(Notification.user_id == user_id)
+            .order_by(desc(Notification.created_at))
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def count_unread(db: Session, user_id: int) -> int:
+        """Count unread notifications for a user."""
+        return (
+            db.query(Notification)
+            .filter(Notification.user_id == user_id, Notification.is_read == False)
+            .count()
+        )
+
+    @staticmethod
+    def get_by_identifier(db: Session, identifier: str | int, user_id: int) -> Optional[Notification]:
+        """Get a single notification by id or uuid ensuring user ownership."""
+        query = db.query(Notification).filter(Notification.user_id == user_id)
+        if isinstance(identifier, int) or (isinstance(identifier, str) and identifier.isdigit()):
+            query = query.filter(Notification.id == int(identifier))
+        else:
+            query = query.filter(Notification.uuid == identifier)
+        return query.first()
+
+    @staticmethod
+    def create(
+        db: Session,
+        user_id: int,
+        title: str,
+        message: str,
+        type: str = "system",
+        action_href: Optional[str] = None,
+        is_read: bool = False,
+    ) -> Notification:
+        """Create a new notification for a specific user."""
+        notif = Notification(
+            user_id=user_id,
+            title=title,
+            message=message,
+            type=type,
+            action_href=action_href,
+            is_read=is_read,
+        )
+        db.add(notif)
+        db.commit()
+        db.refresh(notif)
+        return notif
+
+    @staticmethod
+    def mark_as_read(db: Session, identifier: str | int, user_id: int) -> Optional[Notification]:
+        """Mark a single notification as read, enforcing user isolation."""
+        notif = NotificationRepository.get_by_identifier(db, identifier, user_id)
+        if notif:
+            setattr(notif, "is_read", True)
+            db.commit()
+            db.refresh(notif)
+        return notif
+
+    @staticmethod
+    def mark_all_as_read(db: Session, user_id: int) -> int:
+        """Mark all unread notifications for a user as read."""
+        count = (
+            db.query(Notification)
+            .filter(Notification.user_id == user_id, Notification.is_read == False)
+            .update({"is_read": True}, synchronize_session="fetch")
+        )
+        db.commit()
+        return count
+
+    @staticmethod
+    def clear_all(db: Session, user_id: int) -> int:
+        """Delete all notifications for a user."""
+        count = (
+            db.query(Notification)
+            .filter(Notification.user_id == user_id)
+            .delete(synchronize_session="fetch")
+        )
+        db.commit()
+        return count
+
+    @staticmethod
+    def delete_by_identifier(db: Session, identifier: str | int, user_id: int) -> bool:
+        """Delete a single notification by id/uuid strictly within user scope."""
+        notif = NotificationRepository.get_by_identifier(db, identifier, user_id)
+        if notif:
+            db.delete(notif)
+            db.commit()
+            return True
+        return False
+
+    @staticmethod
+    def seed_initial_if_empty(db: Session, user_id: int) -> List[Notification]:
+        """Seed default starter notifications if the user currently has none."""
+        existing_count = db.query(Notification).filter(Notification.user_id == user_id).count()
+        if existing_count > 0:
+            return []
+
+        defaults = [
+            {
+                "title": "New Verified Job Match",
+                "message": "A new Full Stack Engineer position matching your skillset was published.",
+                "type": "job",
+                "action_href": "/candidate/jobs",
+                "is_read": False,
+            },
+            {
+                "title": "Candidate Profile Verified",
+                "message": "Your profile details and credentials are live on the candidate portal.",
+                "type": "system",
+                "action_href": "/dashboard/profile",
+                "is_read": False,
+            },
+            {
+                "title": "Application Tracked",
+                "message": "Your candidate profile and documents were updated in the tracking database.",
+                "type": "application",
+                "action_href": "/dashboard/applications",
+                "is_read": False,
+            },
+            {
+                "title": "AI Job Agent Ready",
+                "message": "Candidate search agent is ready to automate verified job submissions.",
+                "type": "system",
+                "action_href": "/dashboard/automation",
+                "is_read": True,
+            },
+        ]
+        created = []
+        for item in defaults:
+            notif = Notification(
+                user_id=user_id,
+                title=item["title"],
+                message=item["message"],
+                type=item["type"],
+                action_href=item["action_href"],
+                is_read=item["is_read"],
+            )
+            db.add(notif)
+            created.append(notif)
+        db.commit()
+        for n in created:
+            db.refresh(n)
+        return created
