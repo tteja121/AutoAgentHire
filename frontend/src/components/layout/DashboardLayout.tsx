@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { apiClient, API_ENDPOINTS } from "@/lib/api";
+import { authService } from "@/services/authService";
 
 const sidebarLinks = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -179,8 +180,7 @@ export const DashboardLayout = () => {
   }, []);
 
   const handleLogout = async () => {
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("userRole");
+    await authService.signOut();
     navigate("/login");
   };
 

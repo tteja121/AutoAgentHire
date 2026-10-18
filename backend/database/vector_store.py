@@ -17,14 +17,14 @@ FAISS_AVAILABLE = False
 SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 try:
-    import faiss as _faiss
+    import faiss as _faiss  # type: ignore
     faiss = _faiss
     FAISS_AVAILABLE = True
 except ImportError:
     print("[VS] WARNING - FAISS not installed. Using fallback similarity search.")
 
 try:
-    from sentence_transformers import SentenceTransformer as _SentenceTransformer
+    from sentence_transformers import SentenceTransformer as _SentenceTransformer  # type: ignore
     SentenceTransformer = _SentenceTransformer
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except Exception:
@@ -282,7 +282,7 @@ class VectorStoreManager:
             faiss.write_index(self.job_index, str(self.job_index_path))
             self._save_mapping(self.job_mapping, self.job_mapping_path)
             
-            print("[VS] Added job " + str(job_id) + " to vector index (idx=" + str(idx) + ")")
+            print(f"[VS] Added job {job_id} to vector index (idx={idx})")
         
         return embedding.flatten().tolist()
     
@@ -429,12 +429,12 @@ class VectorStoreManager:
         """Remove a resume from the index (requires rebuilding)"""
         # FAISS doesn't support direct deletion, need to rebuild index
         # For production, consider using IVF index with IDSelector
-        print("[VS] Resume " + str(resume_id) + " marked for removal (rebuild required)")
+        print(f"[VS] Resume {resume_id} marked for removal (rebuild required)")
         return True
     
     def remove_job(self, job_id: str) -> bool:
         """Remove a job from the index (requires rebuilding)"""
-        print("[VS] Job " + str(job_id) + " marked for removal (rebuild required)")
+        print(f"[VS] Job {job_id} marked for removal (rebuild required)")
         return True
     
     def rebuild_indexes(self):

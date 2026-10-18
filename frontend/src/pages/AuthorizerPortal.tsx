@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { useToast } from "@/hooks/use-toast";
 import { apiClient, API_ENDPOINTS } from "@/lib/api";
 import { calculateRecruiterId } from "@/utils/recruiterId";
+import { authService } from "@/services/authService";
 
 export const PERSONAL_DOMAINS = [
   "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com",
@@ -394,9 +395,8 @@ export default function AuthorizerPortal() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("userRole");
+  const handleLogout = async () => {
+    await authService.signOut();
     navigate("/login");
   };
 

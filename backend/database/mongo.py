@@ -20,7 +20,7 @@ DEFAULT_DB_NAME = os.getenv("MONGODB_DB_NAME", "autoagenthire")
 
 
 class MongoDBManager:
-    """Manages MongoDB Atlas connection and document collections."""
+    """Manages MongoDB Atlas connection and document collections with graceful fallback."""
 
     def __init__(self, uri: Optional[str] = None, db_name: Optional[str] = None):
         self.uri = uri or DEFAULT_MONGO_URI
@@ -28,37 +28,83 @@ class MongoDBManager:
         self._client: Optional[MongoClient] = None
         self._db: Optional[Database] = None
         self._connected = False
+        self._last_attempt: float = 0.0
+        self._cooldown_seconds: float = 120.0
+        self._failure_logged = False
+        self._last_error: Optional[str] = None
+        self._indexes_ensured = False
 
     def connect(self) -> bool:
-        """Initialize connection pool to MongoDB Atlas."""
-        if self._connected and self._client:
+        """Initialize connection pool to MongoDB Atlas with circuit-breaker protection."""
+        if self._connected and self._client and self._db is not None:
             return True
 
         if not self.uri:
-            logger.warning("MONGODB_URI not set — MongoDB disabled")
+            if not self._failure_logged:
+                logger.info("[MongoDB] MONGODB_URI not configured — document store disabled (using primary SQLite database).")
+                self._failure_logged = True
             return False
 
+        now = time.time()
+        # Cooldown guard: avoid repeating blocking TLS/handshake attempts during requests
+        if not self._connected and (now - self._last_attempt) < self._cooldown_seconds:
+            return False
+
+        self._last_attempt = now
+
         try:
-            logger.info("Connecting to MongoDB Atlas at %s...", self.uri.split('@')[-1] if '@' in self.uri else 'local')
+            extra_kwargs: Dict[str, Any] = {}
+            try:
+                import certifi
+                extra_kwargs["tlsCAFile"] = certifi.where()
+            except ImportError:
+                pass
+
             self._client = MongoClient(
                 self.uri,
-                serverSelectionTimeoutMS=6000,
-                connectTimeoutMS=10000,
-                socketTimeoutMS=20000,
-                maxPoolSize=50,
-                minPoolSize=5,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=5000,
+                socketTimeoutMS=10000,
+                maxPoolSize=20,
+                minPoolSize=1,
                 retryWrites=True,
                 retryReads=True,
+                **extra_kwargs,
             )
             # Verify connectivity with ping
             self._client.admin.command('ping')
             self._db = self._client[self.db_name]
             self._connected = True
+            self._last_error = None
+            self._failure_logged = False
             logger.info("✓ MongoDB Atlas connected successfully (database: %s)", self.db_name)
-            self.ensure_indexes()
+            if not self._indexes_ensured:
+                try:
+                    self.ensure_indexes()
+                    self._indexes_ensured = True
+                except Exception as idx_err:
+                    logger.debug("Indexes ensure note: %s", idx_err)
             return True
         except Exception as e:
-            logger.error("MongoDB Atlas connection failed: %s", e)
+            raw_err = str(e)
+            if "TLSV1_ALERT_INTERNAL_ERROR" in raw_err or "SSL handshake failed" in raw_err:
+                err_msg = "TLS handshake rejected (likely IP not whitelisted in MongoDB Atlas Network Access or cluster paused)"
+            elif "timed out" in raw_err.lower():
+                err_msg = "Connection timed out"
+            else:
+                err_msg = raw_err.splitlines()[0] if raw_err else "Connection failed"
+
+            self._last_error = err_msg
+            if not self._failure_logged:
+                logger.warning(
+                    "[MongoDB] Optional MongoDB Atlas unavailable: %s. Operating safely on SQLite database. (Next retry in %ds)",
+                    err_msg,
+                    int(self._cooldown_seconds),
+                )
+                self._failure_logged = True
+            else:
+                logger.debug("[MongoDB] Connection retry skipped: %s", err_msg)
+
             self._connected = False
             return False
 
@@ -68,7 +114,7 @@ class MongoDBManager:
         if not self._connected or self._db is None:
             self.connect()
         if self._db is None:
-            raise RuntimeError("MongoDB connection not established.")
+            raise RuntimeError(f"MongoDB connection not established ({self._last_error or 'unavailable'}).")
         return self._db
 
     def get_collection(self, name: str) -> Collection:
@@ -79,24 +125,38 @@ class MongoDBManager:
         """Perform health check on MongoDB cluster."""
         start_time = time.time()
         try:
-            if not self._client:
-                self.connect()
+            if not self._client or not self._connected:
+                connected = self.connect()
+                if not connected or self._client is None:
+                    return {
+                        "status": "disconnected",
+                        "database": self.db_name,
+                        "latency_ms": None,
+                        "collections": [],
+                        "error": self._last_error or "MongoDB Atlas unreachable",
+                    }
             self._client.admin.command('ping')
             latency_ms = round((time.time() - start_time) * 1000, 2)
+            colls = self._db.list_collection_names() if self._db is not None else []
             return {
                 "status": "connected",
                 "database": self.db_name,
                 "latency_ms": latency_ms,
-                "collections": self.db.list_collection_names(),
-                "error": None
+                "collections": colls,
+                "error": None,
             }
         except Exception as exc:
+            err_str = str(exc)
+            if "TLSV1_ALERT_INTERNAL_ERROR" in err_str:
+                err_clean = "TLS handshake rejected (IP not in Atlas Network Access list)"
+            else:
+                err_clean = err_str.splitlines()[0] if err_str else "Health check failed"
             return {
                 "status": "disconnected",
                 "database": self.db_name,
                 "latency_ms": None,
                 "collections": [],
-                "error": str(exc)
+                "error": err_clean,
             }
 
     def ensure_indexes(self):
@@ -289,22 +349,34 @@ class MongoDBManager:
         finally:
             db_session.close()
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Helper Methods for Collections
-    # ─────────────────────────────────────────────────────────────────────────
+    def _is_available(self) -> bool:
+        if self._connected and self._client and self._db is not None:
+            return True
+        return self.connect()
+
     def get_users(self, filter_query: Optional[Dict] = None) -> List[Dict]:
+        if not self._is_available():
+            return []
         return list(self.db["users"].find(filter_query or {}, {"_id": 0}))
 
     def get_jobs(self, filter_query: Optional[Dict] = None, limit: int = 50) -> List[Dict]:
+        if not self._is_available():
+            return []
         return list(self.db["job_postings"].find(filter_query or {}, {"_id": 0}).limit(limit))
 
     def get_applications(self, filter_query: Optional[Dict] = None, limit: int = 50) -> List[Dict]:
+        if not self._is_available():
+            return []
         return list(self.db["job_candidate_applications"].find(filter_query or {}, {"_id": 0}).limit(limit))
 
     def get_resumes(self, filter_query: Optional[Dict] = None) -> List[Dict]:
+        if not self._is_available():
+            return []
         return list(self.db["resumes"].find(filter_query or {}, {"_id": 0}))
 
     def get_audit_logs(self, filter_query: Optional[Dict] = None, limit: int = 50) -> List[Dict]:
+        if not self._is_available():
+            return []
         return list(self.db["audit_logs"].find(filter_query or {}, {"_id": 0}).sort("timestamp", DESCENDING).limit(limit))
 
 

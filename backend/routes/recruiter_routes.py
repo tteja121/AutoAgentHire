@@ -6,14 +6,14 @@ import os
 import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 
 from backend.auth.dependencies import get_current_user, get_current_user_optional
 from backend.database.connection import get_db
-from backend.database.models_complete import User, JobPosting, JobApplication, AuditLog
+from backend.database.models_complete import User, JobPosting, JobApplication, AuditLog, Resume
 
 router = APIRouter(prefix="/recruiter", tags=["Recruiter & Authorizer"])
 
@@ -279,12 +279,13 @@ def get_recruiter_jobs(
         raise HTTPException(status_code=403, detail="Recruiter registration request is pending Authorizer approval")
     jobs = db.query(JobPosting).filter(JobPosting.recruiter_id == current_user.id).order_by(desc(JobPosting.created_at)).all()
     result = []
-    counts = dict(
+    counts_rows = (
         db.query(JobApplication.job_posting_id, func.count(JobApplication.id))
         .filter(JobApplication.job_posting_id.in_([j.id for j in jobs]))
         .group_by(JobApplication.job_posting_id)
         .all()
     )
+    counts = {r[0]: r[1] for r in counts_rows}
     for j in jobs:
         resp = JobPostingResponse.model_validate(j)
         resp.recruiter_name = str(current_user.full_name or current_user.email)
@@ -318,6 +319,9 @@ def get_recruiter_applications(
         item = CandidateApplicationResponse.model_validate(app_record)
         item.job_title = job.title
         item.company_name = job.company_name
+        if item.resume_url and not item.resume_url.startswith("/api/recruiter/files/"):
+            clean_res = app_record.resume_filename or os.path.basename(item.resume_url)
+            item.resume_url = f"/api/recruiter/files/{clean_res}"
         results.append(item)
     return results
 
@@ -327,19 +331,14 @@ def get_recruiter_applications(
 def update_application_status(
     application_id: int,
     payload: ApplicationStatusUpdate,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Recruiter updates tracking status and notes for a candidate application."""
-    if current_user and current_user.role not in ("recruiter", "authorizer", "admin"):
+    if current_user.role not in ("recruiter", "authorizer", "admin"):
         raise HTTPException(status_code=403, detail="Recruiter or Administrator access required")
-    if current_user and current_user.role == "recruiter" and current_user.approval_status != "approved":
+    if current_user.role == "recruiter" and current_user.approval_status != "approved":
         raise HTTPException(status_code=403, detail="Recruiter registration request is pending Authorizer approval")
-
-    if not current_user:
-        current_user = db.query(User).filter(User.role == "recruiter", User.approval_status == "approved").first()
-        if not current_user:
-            current_user = db.query(User).filter(User.role == "recruiter").first()
 
     app_record = (
         db.query(JobApplication)
@@ -351,6 +350,16 @@ def update_application_status(
         raise HTTPException(status_code=404, detail="Candidate application not found")
 
     job = db.query(JobPosting).filter(JobPosting.id == app_record.job_posting_id).first()
+
+    # Ownership check: recruiter can only update applications for their own jobs
+    if current_user.role == "recruiter":
+        if not job or job.recruiter_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Candidate application not found")
+
+    # Ownership check: recruiters may only update applications on their own jobs
+    if current_user.role == "recruiter":
+        if not job or job.recruiter_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Candidate application not found")
     clean_status = (payload.status or "reviewing").strip().lower()
     setattr(app_record, "status", clean_status)
 
@@ -381,17 +390,21 @@ def update_application_status(
     # Dispatch personalized email in text format to the candidate
     from backend.services.email_service import send_candidate_status_update_email
     job_title = job.title if job else "Software Engineer"
-    comp_name = job.company_name if job else (current_user.company_name or "AutoAgentHire Partner")
-    rec_name = current_user.full_name or current_user.company_name or f"{comp_name} Recruiter"
+    comp_default = "AutoAgentHire Partner"
+    if current_user and current_user.company_name:
+        comp_default = str(current_user.company_name)
+    comp_name = str(job.company_name) if (job and job.company_name) else comp_default
+    rec_name = (current_user.full_name or current_user.company_name or f"{comp_name} Recruiter") if current_user else f"{comp_name} Recruiter"
+    rec_email = str(current_user.email) if (current_user and current_user.email) else "support@autoagenthire.com"
 
     email_sent, email_msg_id, email_err = send_candidate_status_update_email(
-        candidate_email=app_record.candidate_email,
-        candidate_name=app_record.candidate_name,
-        job_title=job_title,
+        candidate_email=str(app_record.candidate_email),
+        candidate_name=str(app_record.candidate_name or "Applicant"),
+        job_title=str(job_title),
         company_name=comp_name,
         new_status=clean_status,
         recruiter_name=rec_name,
-        recruiter_email=current_user.email,
+        recruiter_email=rec_email,
         meeting_link=getattr(app_record, "interview_meeting_link", None),
         scheduled_at=getattr(app_record, "interview_scheduled_at", None),
         interview_round=getattr(app_record, "interview_round", None),
@@ -440,6 +453,63 @@ def update_application_status(
         "email_recipient": app_record.candidate_email,
         "email_message_id": email_msg_id,
     }
+
+
+# ── Recruiter: Analyze Candidate Resume ───────────────────────────────────────
+
+@router.post("/applications/{application_id}/analyze-candidate")
+async def analyze_candidate_resume(
+    application_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Recruiter uses Gemini to analyze a candidate's resume for a job application they own."""
+    import asyncio as _asyncio
+    from backend.llm.gemini_service import get_gemini_service
+    from backend.database.models_complete import Resume as _Resume
+
+    if current_user.role != "recruiter":
+        raise HTTPException(status_code=403, detail="Recruiter access required")
+    if current_user.approval_status != "approved":
+        raise HTTPException(status_code=403, detail="Recruiter registration request is pending Authorizer approval")
+
+    app_record = db.query(JobApplication).filter(JobApplication.id == application_id).first()
+    if not app_record:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    job = db.query(JobPosting).filter(JobPosting.id == app_record.job_posting_id).first()
+    if not job or job.recruiter_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    # Fetch resume text
+    resume = (
+        db.query(_Resume)
+        .filter(_Resume.user_id == app_record.candidate_id, _Resume.is_active == True)
+        .first()
+    )
+    resume_text = (resume.raw_text or "") if resume else ""
+    if not resume_text and app_record.resume_url:
+        resume_text = f"Resume on file: {app_record.resume_url}"
+
+    gemini_service = get_gemini_service()
+    analysis = await _asyncio.to_thread(gemini_service.analyze_resume, str(resume_text), str(job.description or ""))
+
+    # Audit log
+    try:
+        audit = AuditLog(
+            user_id=current_user.id,
+            performed_by_email=current_user.email,
+            action="CANDIDATE_ANALYZED",
+            target_type="application",
+            target_id=str(application_id),
+            details={"candidate_email": app_record.candidate_email},
+        )
+        db.add(audit)
+        db.commit()
+    except Exception:
+        pass
+
+    return {"status": "success", "application_id": application_id, "analysis": analysis}
 
 
 # ── Authorizer Endpoints ──────────────────────────────────────────────────────
@@ -690,10 +760,10 @@ def authorizer_create_recruiter_account(
     # Send welcome email via automatic email sender
     try:
         send_recruiter_welcome_email(
-            recruiter_email=new_recruiter.email,
-            recruiter_name=new_recruiter.full_name or "Recruiter",
+            recruiter_email=str(new_recruiter.email),
+            recruiter_name=str(new_recruiter.full_name or "Recruiter"),
             custom_user_id=user_id_code,
-            company_name=new_recruiter.company_name or "AutoHire Partner",
+            company_name=str(new_recruiter.company_name or "AutoHire Partner"),
             temp_password=payload.password,
         )
     except Exception as exc:
@@ -883,6 +953,7 @@ async def apply_to_job(
     cover_letter: Optional[str] = Form(None),
     resume: Optional[UploadFile] = File(None),
     cv: Optional[UploadFile] = File(None),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Candidate applies to a recruiter's posted job, uploading Resume & CV files."""
@@ -892,14 +963,17 @@ async def apply_to_job(
         send_application_notification_email,
     )
 
-    clean_email = candidate_email.strip() if candidate_email else ""
+    # Use authenticated user identity — never trust form-supplied email for ownership
+    clean_email = current_user.email.strip().lower()
+    clean_name = (current_user.full_name or candidate_name).strip()
+    cand_id = current_user.id
+
     if not validate_email_address(clean_email):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid email address format: '{candidate_email}'. Please provide a valid email to receive your application confirmation."
+            detail=f"Invalid email address format: '{clean_email}'. Please provide a valid email to receive your application confirmation."
         )
 
-    clean_name = candidate_name.strip() if candidate_name else ""
     if not clean_name:
         raise HTTPException(status_code=400, detail="Candidate full name is required.")
 
@@ -929,17 +1003,18 @@ async def apply_to_job(
             f.write(cv_content)
         cv_url = f"/api/recruiter/files/{safe_cv_name}"
 
-    # Step 1: Save application to database first
+    # Step 1: Save application to database first with proper candidate_id
     application = JobApplication(
         job_posting_id=job.id,
+        candidate_id=cand_id,
         candidate_name=clean_name,
         candidate_email=clean_email,
         candidate_phone=candidate_phone.strip() if candidate_phone else None,
         linkedin_url=linkedin_url.strip() if linkedin_url else None,
         portfolio_url=portfolio_url.strip() if portfolio_url else None,
         cover_letter=cover_letter.strip() if cover_letter else None,
-        resume_url=resume_url or f"https://autoagenthire-resumes.local/{resume_filename or 'resume.pdf'}",
-        resume_filename=resume_filename or "resume.pdf",
+        resume_url=resume_url or None,
+        resume_filename=resume_filename or None,
         cv_url=cv_url or resume_url,
         cv_filename=cv_filename or resume_filename,
         status="pending",
@@ -953,52 +1028,53 @@ async def apply_to_job(
     # Step 2: Idempotent Thank-You Confirmation Email Dispatch
     idempotency_key = f"app-thankyou-{application.id}"
     if application.email_idempotency_key != idempotency_key or application.email_status != "Sent":
-        application.email_idempotency_key = idempotency_key
+        setattr(application, "email_idempotency_key", idempotency_key)
         db.commit()
 
         try:
             # Look up registered Authorizer's official email address and full name
             auth_user = db.query(User).filter(User.role == "authorizer").order_by(User.id.asc()).first()
-            auth_email = auth_user.email if auth_user else None
-            auth_name = auth_user.full_name if auth_user else "Senior Platform Authorizer"
+            auth_email = str(auth_user.email) if (auth_user and auth_user.email) else None
+            auth_name = str(auth_user.full_name) if (auth_user and auth_user.full_name) else "Senior Platform Authorizer"
 
             email_sent, email_msg_id, email_err = send_candidate_application_thank_you_email(
-                candidate_email=clean_email,
-                candidate_name=clean_name,
-                job_title=job.title,
-                company_name=job.company_name,
+                candidate_email=str(clean_email),
+                candidate_name=str(clean_name),
+                job_title=str(job.title),
+                company_name=str(job.company_name),
                 application_id=application.id,
                 authorizer_email=auth_email,
                 authorizer_name=auth_name,
             )
             if email_sent:
-                application.email_status = "Sent"
-                application.email_message_id = email_msg_id
-                application.email_sent_at = datetime.utcnow()
-                application.email_error = None
+                setattr(application, "email_status", "Sent")
+                setattr(application, "email_message_id", email_msg_id)
+                setattr(application, "email_sent_at", datetime.now(timezone.utc))
+                setattr(application, "email_error", None)
             else:
-                application.email_status = "Failed"
-                application.email_error = email_err
+                setattr(application, "email_status", "Failed")
+                setattr(application, "email_error", email_err)
 
             db.commit()
             db.refresh(application)
         except Exception as exc:
             import logging as _log
             _log.getLogger(__name__).warning("Unexpected error during candidate thank-you email dispatch: %s", exc)
-            application.email_status = "Failed"
-            application.email_error = str(exc)
+            setattr(application, "email_status", "Failed")
+            setattr(application, "email_error", str(exc))
             db.commit()
 
     # Step 3: Dispatch recruiter notification
     try:
         recruiter_user = db.query(User).filter(User.id == job.recruiter_id).first() if job.recruiter_id else None
-        target_recruiter_email = recruiter_user.email if recruiter_user else "re@auto.in"
+        target_recruiter_email = str(recruiter_user.email) if (recruiter_user and recruiter_user.email) else "re@auto.in"
+        target_rec_name = str(recruiter_user.full_name) if (recruiter_user and recruiter_user.full_name) else str(job.recruiter_name or "Recruiter")
         send_application_notification_email(
             recruiter_email=target_recruiter_email,
-            recruiter_name=recruiter_user.full_name if recruiter_user else (job.recruiter_name or "Recruiter"),
-            job_title=job.title,
-            candidate_name=clean_name,
-            candidate_email=clean_email,
+            recruiter_name=target_rec_name,
+            job_title=str(job.title),
+            candidate_name=str(clean_name),
+            candidate_email=str(clean_email),
             candidate_phone=candidate_phone or "",
             resume_url=resume_url,
         )
@@ -1018,31 +1094,131 @@ async def apply_to_job(
 
 
 @router.get("/files/{filename:path}")
-def serve_file(filename: str):
-    """Serve uploaded resume/CV for recruiter inspection with prefix and fallback matching."""
+def serve_file(
+    filename: str,
+    token: Optional[str] = Query(None),
+    auth_header_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """Serve uploaded resume/CV for authorized users (own resumes for candidates, applicants to owned jobs for recruiters, or authorizers)."""
     from fastapi.responses import FileResponse
     clean_name = os.path.basename(filename)
 
-    # 1. Exact match in UPLOAD_DIR
-    file_path = os.path.join(UPLOAD_DIR, clean_name)
-    if os.path.exists(file_path) and os.path.isfile(file_path):
-        return FileResponse(file_path)
+    current_user = auth_header_user
+    if not current_user and token:
+        try:
+            current_user = get_current_user(token=token, db=db)
+        except Exception:
+            current_user = None
 
-    # 2. Check prefix matches in UPLOAD_DIR (e.g. 14_lokesh.pdf or uuid_lokesh.pdf)
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to view or download documents.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 1. Authorize file access
+    import re
+    stripped_name = re.sub(r'^\d+_|^[0-9a-fA-F\-]{32,36}_', '', clean_name)
+
+    is_authorized = False
+    if current_user.role == "authorizer":
+        is_authorized = True
+    elif current_user.role == "candidate":
+        # Check if candidate owns this resume directly
+        if clean_name.startswith(f"{current_user.id}_"):
+            is_authorized = True
+        else:
+            owned_resume = db.query(Resume).filter(
+                Resume.user_id == current_user.id,
+                (Resume.storage_url.like(f"%{clean_name}%") | Resume.file_path.like(f"%{clean_name}%") |
+                 Resume.storage_url.like(f"%{stripped_name}%") | Resume.file_path.like(f"%{stripped_name}%"))
+            ).first()
+            if owned_resume:
+                is_authorized = True
+            else:
+                owned_app = db.query(JobApplication).filter(
+                    (JobApplication.candidate_id == current_user.id) | (JobApplication.candidate_email.ilike(current_user.email)),
+                    (JobApplication.resume_url.like(f"%{clean_name}%") | JobApplication.cv_url.like(f"%{clean_name}%") |
+                     JobApplication.resume_url.like(f"%{stripped_name}%") | JobApplication.cv_url.like(f"%{stripped_name}%") |
+                     (JobApplication.resume_filename == clean_name) | (JobApplication.resume_filename == stripped_name))
+                ).first()
+                if owned_app:
+                    is_authorized = True
+    elif current_user.role == "recruiter":
+        recruiter_job_ids = [j.id for j in db.query(JobPosting.id).filter(JobPosting.recruiter_id == current_user.id).all()]
+        if recruiter_job_ids:
+            matching_app = db.query(JobApplication).filter(
+                JobApplication.job_posting_id.in_(recruiter_job_ids),
+                (JobApplication.resume_url.like(f"%{clean_name}%") | JobApplication.cv_url.like(f"%{clean_name}%") |
+                 JobApplication.resume_url.like(f"%{stripped_name}%") | JobApplication.cv_url.like(f"%{stripped_name}%") |
+                 (JobApplication.resume_filename == clean_name) | (JobApplication.resume_filename == stripped_name))
+            ).first()
+            if matching_app:
+                is_authorized = True
+        if not is_authorized:
+            # Also check if job company matches recruiter's company
+            matching_apps = db.query(JobApplication).filter(
+                (JobApplication.resume_url.like(f"%{clean_name}%") | JobApplication.cv_url.like(f"%{clean_name}%") |
+                 JobApplication.resume_url.like(f"%{stripped_name}%") | JobApplication.cv_url.like(f"%{stripped_name}%") |
+                 (JobApplication.resume_filename == clean_name) | (JobApplication.resume_filename == stripped_name))
+            ).all()
+            for app in matching_apps:
+                job = db.query(JobPosting).filter(JobPosting.id == app.job_posting_id).first()
+                if job and (job.recruiter_id == current_user.id or (current_user.company_name and job.company_name and current_user.company_name.lower() == job.company_name.lower())):
+                    is_authorized = True
+                    break
+
+    if not is_authorized:
+        raise HTTPException(status_code=403, detail="You are not authorized to access this file.")
+
+    def _serve_file_response(path_to_file: str):
+        media_type = "application/pdf" if clean_name.lower().endswith(".pdf") or path_to_file.lower().endswith(".pdf") else None
+        headers = {
+            "Content-Disposition": f'inline; filename="{clean_name}"',
+            "Cache-Control": "private, max-age=3600",
+        }
+        return FileResponse(path_to_file, media_type=media_type, headers=headers)
+
+    # 2. Exact match in UPLOAD_DIR
+    for name_candidate in [clean_name, stripped_name]:
+        if name_candidate:
+            file_path = os.path.join(UPLOAD_DIR, name_candidate)
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                return _serve_file_response(file_path)
+
+    # 3. Check prefix / suffix / substring matches in UPLOAD_DIR (e.g. 14_lokesh.pdf or uuid_lokesh.pdf)
     if os.path.exists(UPLOAD_DIR):
         candidates = []
         for f in os.listdir(UPLOAD_DIR):
-            if f.endswith(clean_name) or clean_name.lower() in f.lower():
+            f_clean = re.sub(r'^\d+_|^[0-9a-fA-F\-]{32,36}_', '', f)
+            if (f.endswith(clean_name) or clean_name.lower() in f.lower() or
+                (stripped_name and (f.endswith(stripped_name) or stripped_name.lower() in f.lower() or f_clean.lower() == stripped_name.lower()))):
                 candidates.append(os.path.join(UPLOAD_DIR, f))
         if candidates:
-            candidates.sort(key=os.path.getmtime, reverse=True)
-            return FileResponse(candidates[0])
+            # Prefer larger actual files over dummy files, sort newest first
+            candidates.sort(key=lambda p: (os.path.getsize(p) > 100, os.path.getmtime(p)), reverse=True)
+            return _serve_file_response(candidates[0])
 
-    # 3. Check root uploads, data, and temp dirs
+    # 4. Check Resume database table
+    matching_resume = db.query(Resume).filter(
+        (Resume.filename == clean_name) | (Resume.filename == stripped_name) |
+        (Resume.storage_url.like(f"%{clean_name}%")) | (Resume.file_path.like(f"%{clean_name}%")) |
+        (Resume.storage_url.like(f"%{stripped_name}%")) | (Resume.file_path.like(f"%{stripped_name}%"))
+    ).order_by(Resume.id.desc()).first()
+    if matching_resume and matching_resume.file_path:
+        matching_fp = str(matching_resume.file_path)
+        if os.path.exists(matching_fp):
+            return _serve_file_response(matching_fp)
+
+    # 5. Check root uploads, data, and temp dirs
     for alt_dir in ["uploads", "data", "temp"]:
-        alt_path = os.path.join(os.getcwd(), alt_dir, clean_name)
-        if os.path.exists(alt_path) and os.path.isfile(alt_path):
-            return FileResponse(alt_path)
+        for name_candidate in [clean_name, stripped_name]:
+            if name_candidate:
+                alt_path = os.path.join(os.getcwd(), alt_dir, name_candidate)
+                if os.path.exists(alt_path) and os.path.isfile(alt_path):
+                    return _serve_file_response(alt_path)
 
     raise HTTPException(status_code=404, detail=f"File '{filename}' not found")
 
@@ -1051,8 +1227,8 @@ def serve_file(filename: str):
 @router.post("/applications/{application_id}/analyze-resume")
 async def analyze_candidate_resume(
     application_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     Directly analyze a candidate's uploaded resume for recruiter inspection using Google Gemini AI.
@@ -1066,43 +1242,82 @@ async def analyze_candidate_resume(
     if not app_record:
         raise HTTPException(status_code=404, detail="Candidate application not found")
 
-    target_filename = app_record.resume_filename or "resume.pdf"
-    clean_name = os.path.basename(target_filename)
-    if app_record.resume_url and "/files/" in app_record.resume_url:
-        clean_name = os.path.basename(app_record.resume_url.split("/files/")[-1])
+    # Authorization: recruiter must own the job this application belongs to; candidates must own the application
+    job = db.query(JobPosting).filter(JobPosting.id == app_record.job_posting_id).first()
+    if current_user.role == "recruiter":
+        if not job or job.recruiter_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access or analyze this application")
+    elif current_user.role == "candidate":
+        if app_record.candidate_id != current_user.id and (
+            not app_record.candidate_email or app_record.candidate_email.lower() != current_user.email.lower()
+        ):
+            raise HTTPException(status_code=403, detail="Not authorized to access or analyze this application")
+    elif current_user.role not in ("authorizer", "admin"):
+        raise HTTPException(status_code=403, detail="Not authorized to access or analyze this application")
 
-    matched_path = None
-    if os.path.exists(os.path.join(UPLOAD_DIR, clean_name)):
-        matched_path = os.path.join(UPLOAD_DIR, clean_name)
-    elif os.path.exists(UPLOAD_DIR):
+    target_filename = app_record.resume_filename or "resume.pdf"
+    clean_name = os.path.basename(str(target_filename))
+    if app_record.resume_url and "/files/" in app_record.resume_url:
+        clean_name = os.path.basename(str(app_record.resume_url.split("/files/")[-1]))
+    import re
+    stripped_name = re.sub(r'^\d+_|^[0-9a-fA-F\-]{32,36}_', '', clean_name)
+
+    matched_path: Optional[str] = None
+    for name_candidate in [clean_name, stripped_name]:
+        if name_candidate and os.path.exists(os.path.join(UPLOAD_DIR, name_candidate)):
+            matched_path = os.path.join(UPLOAD_DIR, name_candidate)
+            break
+
+    if not matched_path and os.path.exists(UPLOAD_DIR):
         candidates = []
         for f in os.listdir(UPLOAD_DIR):
-            if f.endswith(clean_name) or clean_name.lower() in f.lower():
+            f_clean = re.sub(r'^\d+_|^[0-9a-fA-F\-]{32,36}_', '', f)
+            if (f.endswith(clean_name) or clean_name.lower() in f.lower() or
+                (stripped_name and (f.endswith(stripped_name) or stripped_name.lower() in f.lower() or f_clean.lower() == stripped_name.lower()))):
                 candidates.append(os.path.join(UPLOAD_DIR, f))
         if candidates:
-            candidates.sort(key=os.path.getmtime, reverse=True)
+            candidates.sort(key=lambda p: (os.path.getsize(p) > 100, os.path.getmtime(p)), reverse=True)
             matched_path = candidates[0]
 
-    # If still not found, check any pdf in uploads/resumes as fallback
-    if not matched_path and os.path.exists(UPLOAD_DIR):
-        pdfs = [os.path.join(UPLOAD_DIR, f) for f in os.listdir(UPLOAD_DIR) if f.endswith(".pdf")]
-        if pdfs:
-            pdfs.sort(key=os.path.getmtime, reverse=True)
-            matched_path = pdfs[0]
+    # Check by candidate_id in UPLOAD_DIR
+    if not matched_path and app_record.candidate_id and os.path.exists(UPLOAD_DIR):
+        candidates = [os.path.join(UPLOAD_DIR, f) for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{app_record.candidate_id}_")]
+        if candidates:
+            candidates.sort(key=lambda p: (os.path.getsize(p) > 100, os.path.getmtime(p)), reverse=True)
+            matched_path = candidates[0]
+
+    # Check Resume table
+    if not matched_path:
+        cand_res = None
+        if app_record.candidate_id:
+            cand_res = db.query(Resume).filter(Resume.user_id == app_record.candidate_id).order_by(Resume.id.desc()).first()
+        if not cand_res and app_record.candidate_email:
+            user = db.query(User).filter(User.email.ilike(app_record.candidate_email)).first()
+            if user:
+                cand_res = db.query(Resume).filter(Resume.user_id == user.id).order_by(Resume.id.desc()).first()
+        if cand_res and cand_res.file_path:
+            cand_fp = str(cand_res.file_path)
+            if os.path.exists(cand_fp):
+                matched_path = cand_fp
+
+    # Do NOT fall back to "any pdf in uploads/resumes" — that could return the WRONG candidate's resume.
+    # If no file is found, use the candidate's application data as the text for analysis.
 
     resume_text = ""
-    if matched_path and os.path.exists(matched_path):
-        ext = os.path.splitext(matched_path)[-1].lower()
-        try:
-            if ext == ".pdf":
-                resume_text = extract_text_from_pdf(matched_path)
-            elif ext == ".docx":
-                resume_text = extract_text_from_docx(matched_path)
-            elif ext == ".txt":
-                with open(matched_path, "r", encoding="utf-8", errors="ignore") as f:
-                    resume_text = f.read()
-        except Exception as e:
-            print(f"[Analyze Resume] Error reading file: {e}")
+    if matched_path:
+        clean_file_path = str(matched_path)
+        if os.path.exists(clean_file_path):
+            ext = os.path.splitext(clean_file_path)[-1].lower()
+            try:
+                if ext == ".pdf":
+                    resume_text = extract_text_from_pdf(clean_file_path)
+                elif ext == ".docx":
+                    resume_text = extract_text_from_docx(clean_file_path)
+                elif ext == ".txt":
+                    with open(clean_file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        resume_text = f.read()
+            except Exception as e:
+                print(f"[Analyze Resume] Error reading file: {e}")
 
     if not resume_text:
         resume_text = (

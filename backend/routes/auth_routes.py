@@ -88,6 +88,7 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     role: str = "recruiter"
+    email: str | None = None
     full_name: str | None = None
     company_name: str | None = None
     custom_user_id: str | None = None
@@ -244,7 +245,7 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
         from backend.services.email_service import send_signup_verification_code
         email_sent = send_signup_verification_code(clean_email, clean_name, otp_code)
         import logging as _logging
-        _logging.getLogger(__name__).info("Client signup OTP %s dispatched to %s (sent=%s)", otp_code, clean_email, email_sent)
+        _logging.getLogger(__name__).info("Client signup verification email dispatched to %s (sent=%s)", clean_email, email_sent)
 
         return SignupResponse(
             status="pending_verification",
@@ -343,6 +344,7 @@ def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
             access_token=access_token,
             token_type="bearer",
             role=user.role,
+            email=user.email,
             full_name=user.full_name,
             custom_user_id=user.custom_user_id,
             approval_status=user.approval_status or "approved",
@@ -381,6 +383,7 @@ def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
         access_token=access_token,
         token_type="bearer",
         role=user.role,
+        email=user.email,
         full_name=user.full_name,
         custom_user_id=user.custom_user_id,
         approval_status="approved",
@@ -413,7 +416,7 @@ def resend_signup_otp(body: ResendOtpRequest, db: Session = Depends(get_db)):
     from backend.services.email_service import send_signup_verification_code
     email_sent = send_signup_verification_code(clean_email, user.full_name, otp_code)
     import logging as _logging
-    _logging.getLogger(__name__).info("Resent OTP %s dispatched to %s (sent=%s)", otp_code, clean_email, email_sent)
+    _logging.getLogger(__name__).info("Resent verification code dispatched to %s (sent=%s)", clean_email, email_sent)
 
     return {
         "status": "success",
@@ -666,6 +669,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         access_token=access_token,
         token_type="bearer",
         role=user_role,
+        email=str(user.email),
         full_name=getattr(user, "full_name", None),
         company_name=getattr(user, "company_name", None),
         custom_user_id=getattr(user, "custom_user_id", None) or getattr(user, "uuid", None),
@@ -795,6 +799,7 @@ async def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
         access_token=access_token,
         token_type="bearer",
         role=user_role,
+        email=str(user.email),
         full_name=getattr(user, "full_name", None),
         company_name=getattr(user, "company_name", None),
         custom_user_id=getattr(user, "custom_user_id", None) or getattr(user, "uuid", None),

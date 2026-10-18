@@ -22,7 +22,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from backend.database.models_complete import Base
 
 _SQLITE_FALLBACK = 'sqlite:///./data/autoagenthire.db'
-_echo = os.getenv('DEBUG', 'False').lower() == 'true'
+
+import logging
+# SQL statement echo is disabled by default to maintain clean logs and prevent leaking query parameters.
+# Can be enabled explicitly for temporary debugging via SQL_ECHO=true or SQLALCHEMY_ECHO=true in .env
+_echo = os.getenv('SQL_ECHO', os.getenv('SQLALCHEMY_ECHO', 'False')).lower() == 'true'
+
+if not _echo:
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.orm').setLevel(logging.WARNING)
 
 
 def _make_engine(url: str):
@@ -118,28 +128,34 @@ _COLUMN_MIGRATIONS = [
 
 
 def _run_migrations():
-    """Apply any missing column additions to existing tables."""
+    """Apply any missing column additions to existing tables efficiently."""
     is_sqlite = DATABASE_URL.startswith("sqlite")
+    
+    # Group columns by table so we query table_info only ONCE per table
+    tables_map = {}
     for table, column, definition in _COLUMN_MIGRATIONS:
-        with engine.begin() as conn:
+        tables_map.setdefault(table, []).append((column, definition))
+
+    with engine.begin() as conn:
+        for table, col_defs in tables_map.items():
             try:
                 if is_sqlite:
-                    # SQLite: check information_schema equivalent
                     result = conn.execute(text(f"PRAGMA table_info({table})"))
-                    cols = [row[1] for row in result]
-                    if column in cols:
-                        continue
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+                    existing_cols = {row[1] for row in result}
+                    for column, definition in col_defs:
+                        if column not in existing_cols:
+                            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+                            print(f"[DB] Migration: added column {table}.{column}")
                 else:
-                    conn.execute(text(
-                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}"
-                    ))
-                print(f"[DB] Migration: added column {table}.{column}")
+                    for column, definition in col_defs:
+                        conn.execute(text(
+                            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}"
+                        ))
             except Exception as exc:
                 msg = str(exc).lower()
                 # "already exists" or "duplicate column" — safe to ignore
                 if "already exists" not in msg and "duplicate column" not in msg:
-                    print(f"[DB] Migration warning ({table}.{column}): {str(exc).splitlines()[0]}")
+                    print(f"[DB] Migration warning ({table}): {str(exc).splitlines()[0]}")
 
 
 def init_db():
@@ -163,10 +179,12 @@ def init_db():
         from backend.auth.password import hash_password
         from backend.database.models_complete import User
         with SessionLocal() as db:
-            existing_auth = db.query(User).filter(User.email.ilike("Author@gmail.com")).first()
+            existing_auth = db.query(User).filter(
+                (User.custom_user_id == "AUTH-001") | (User.email.ilike("Author@auto.in")) | (User.email.ilike("Author@gmail.com"))
+            ).first()
             if not existing_auth:
                 new_auth = User(
-                    email="Author@gmail.com",
+                    email="Author@auto.in",
                     hashed_password=hash_password("Author@123"),
                     full_name="System Authorizer",
                     role="authorizer",
@@ -176,7 +194,7 @@ def init_db():
                 )
                 db.add(new_auth)
                 db.commit()
-                print("[DB] System Authorizer account seeded: Author@gmail.com (ID: AUTH-001)")
+                print("[DB] System Authorizer account seeded: Author@auto.in (ID: AUTH-001)")
             else:
                 existing_auth.role = "authorizer"  # type: ignore
                 existing_auth.is_active = True  # type: ignore
@@ -185,7 +203,9 @@ def init_db():
                 db.commit()
 
             # Seed pre-configured Recruiter account: Re@auto.in / Re@123
-            existing_rec = db.query(User).filter(User.email.ilike("re@auto.in")).first()
+            existing_rec = db.query(User).filter(
+                (User.custom_user_id == "REC-1001") | (User.email.ilike("re@auto.in"))
+            ).first()
             if not existing_rec:
                 new_rec = User(
                     email="Re@auto.in",

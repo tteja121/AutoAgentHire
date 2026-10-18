@@ -25,13 +25,16 @@ import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 
 from pypdf import PdfReader
 import docx
 import numpy as np
-import faiss
+try:
+    import faiss  # type: ignore
+except ImportError:
+    faiss = None  # type: ignore
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -90,7 +93,7 @@ class ResumeIntelligence:
         
         # FAISS vector store
         self.dimension = 1536  # OpenAI embedding dimension
-        self.index: Optional[faiss.IndexFlatIP] = None  # Inner product (cosine similarity)
+        self.index: Optional[Any] = None  # Inner product (cosine similarity)
         self.resume_data: Optional[ResumeData] = None
         
         logger.info("✅ Resume Intelligence initialized")
@@ -315,6 +318,11 @@ Return ONLY a valid JSON object with these exact keys:
         if self.resume_data is None or self.resume_data.embedding is None:
             raise ValueError("Resume data and embedding required")
         
+        if faiss is None:
+            logger.warning("FAISS is not installed. Vector index disabled.")
+            self.index = None
+            return
+
         # Create FAISS index (Inner Product for cosine similarity with normalized vectors)
         self.index = faiss.IndexFlatIP(self.dimension)
         
@@ -330,10 +338,11 @@ Return ONLY a valid JSON object with these exact keys:
     
     def match_job(
         self,
-        job_id: str,
-        job_title: str,
-        company: str,
-        job_description: str
+        job_id: str = "",
+        job_title: str = "",
+        company: str = "",
+        job_description: str = "",
+        **kwargs: Any,
     ) -> JobMatch:
         """
         Match a job description against resume using semantic similarity.
@@ -347,6 +356,11 @@ Return ONLY a valid JSON object with these exact keys:
         Returns:
             JobMatch: Matching result with score and recommendation
         """
+        job_title = job_title or kwargs.get("title", "")
+        job_description = job_description or kwargs.get("description", "")
+        job_id = job_id or kwargs.get("id", "")
+        company = company or kwargs.get("company_name", "")
+
         if self.resume_data is None:
             raise ValueError("Resume data not loaded. Call parse_resume_file() first.")
         
@@ -517,9 +531,9 @@ if __name__ == "__main__":
     # Example job matching
     example_job = {
         'job_id': 'job123',
-        'title': 'Senior ML Engineer',
+        'job_title': 'Senior ML Engineer',
         'company': 'TechCorp',
-        'description': 'Looking for ML engineer with Python, TensorFlow, and 5+ years experience...'
+        'job_description': 'Looking for ML engineer with Python, TensorFlow, and 5+ years experience...'
     }
     
     match = resume_intel.match_job(**example_job)

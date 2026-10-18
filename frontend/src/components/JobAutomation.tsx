@@ -252,12 +252,17 @@ export default function JobAutomation() {
   // Apply to a single job
   const handleApplySingle = async (jobId: string) => {
     try {
+      const targetJob = matchedJobs.find(j => j.id === jobId);
+      const recipientEmail = clientEmail || profile?.email || 'candidate@example.com';
+      const recipientName = clientName || profile?.candidate_name || 'Candidate';
+      const recipientPhone = clientPhone || profile?.phone || '';
+      const verifiedExp = clientExperience || profile?.experience || 'Experience verified from resume';
+      const resumeName = resumeFile?.name || profile?.resume_name || 'resume.pdf';
+
       // Mark as applied locally
       setMatchedJobs(prev =>
         prev.map(j => (j.id === jobId ? { ...j, applied: true } : j))
       );
-
-      const targetJob = matchedJobs.find(j => j.id === jobId);
 
       // Persist application to Client Store & SQLite Database via applicationService
       await applicationService.saveClientApplication({
@@ -266,15 +271,17 @@ export default function JobAutomation() {
         company: targetJob?.company || 'AutoAgentHire Partner',
         location: targetJob?.location || 'Remote',
         match_score: targetJob?.match_percentage || 85,
-        candidate_name: clientName || profile?.candidate_name || 'Candidate',
-        candidate_email: clientEmail || profile?.email || 'candidate@example.com',
-        candidate_phone: clientPhone || profile?.phone || '',
+        candidate_name: recipientName,
+        candidate_email: recipientEmail,
+        candidate_phone: recipientPhone,
+        experience: verifiedExp,
+        resume_filename: resumeName,
         url: '/candidate/jobs',
       });
 
       toast({
-        title: 'Application Submitted & Stored! 🎉',
-        description: `Successfully applied to ${targetJob?.title} at ${targetJob?.company}. Recorded in your Applications section!`,
+        title: 'Application Submitted! 🎉',
+        description: `Personalized confirmation email sent to ${recipientEmail} for ${targetJob?.title} at ${targetJob?.company}!`,
       });
     } catch (err: any) {
       toast({
@@ -322,20 +329,27 @@ export default function JobAutomation() {
         return;
       }
 
+      const recipientEmail = (clientEmail || profile?.email || '').trim();
+      const recipientName = (clientName || profile?.candidate_name || 'Candidate').trim();
+      const recipientPhone = (clientPhone || profile?.phone || '').trim();
+      const verifiedExp = (clientExperience || profile?.experience || 'Experience verified from resume').trim();
+      const resumeName = resumeFile?.name || profile?.resume_name || 'resume.pdf';
+
       // 1. Send batch application to backend endpoint and store in Client Store
-      for (const targetJob of unappliedDisplayedJobs) {
-        await applicationService.saveClientApplication({
-          id: targetJob.id,
-          title: targetJob.title,
-          company: targetJob.company,
-          location: targetJob.location,
-          match_score: targetJob.match_percentage || 85,
-          candidate_name: clientName || profile?.candidate_name || 'Candidate',
-          candidate_email: clientEmail || profile?.email || 'candidate@example.com',
-          candidate_phone: clientPhone || profile?.phone || '',
-          url: '/candidate/jobs',
-        });
-      }
+      await applicationService.applyBatchApplications({
+        candidate_name: recipientName,
+        candidate_email: recipientEmail,
+        candidate_phone: recipientPhone,
+        candidate_experience: verifiedExp,
+        resume_name: resumeName,
+        jobs: unappliedDisplayedJobs.map(j => ({
+          id: j.id,
+          title: j.title,
+          company: j.company,
+          location: j.location,
+          match_score: j.match_percentage,
+        })),
+      });
 
       // 2. Mark targeted jobs as applied in local state
       setMatchedJobs(prev =>
@@ -345,8 +359,8 @@ export default function JobAutomation() {
       setShowApplyAllModal(false);
 
       toast({
-        title: '🎉 Matching Jobs Applied Successfully!',
-        description: `Submitted applications for ${targetJobIds.length} positions with verified experience: "${clientExperience}".`,
+        title: '🎉 Applications Submitted Successfully!',
+        description: `Personalized thank you email sent to ${recipientEmail} for each of the ${targetJobIds.length} applied positions!`,
       });
 
     } catch (err: any) {

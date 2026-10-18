@@ -1,0 +1,8 @@
+# Enforce Unix LF line endings on shell scripts across all platforms
+*.sh text eol=lf
+.python-version text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+render.yaml text eol=lf
+requirements.txt text eol=lf
+requirements-prod.txt text eol=lf

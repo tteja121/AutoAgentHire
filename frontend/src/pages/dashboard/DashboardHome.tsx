@@ -50,9 +50,15 @@ export default function DashboardHome() {
     const handleProfileSync = () => {
       fetchUser();
     };
+    const handleLogout = () => {
+      setUserName("");
+      setAgentStatus(null);
+    };
     window.addEventListener("candidateProfileUpdated", handleProfileSync);
+    window.addEventListener("authLogout", handleLogout);
     return () => {
       window.removeEventListener("candidateProfileUpdated", handleProfileSync);
+      window.removeEventListener("authLogout", handleLogout);
     };
   }, []);
 

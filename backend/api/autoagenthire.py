@@ -73,35 +73,7 @@ class ApplySingleRequest(BaseModel):
     dry_run: Optional[bool] = True
 
 
-@router.get("/api/applications")
-async def get_applications():
-    """
-    Get all submitted job applications
-    """
-    try:
-        from pathlib import Path
-        import json
-        
-        applications_file = Path("data/applications.json")
-        
-        if not applications_file.exists():
-            return {
-                "status": "success",
-                "applications": [],
-                "count": 0
-            }
-        
-        with open(applications_file, 'r') as f:
-            applications = json.load(f)
-        
-        return {
-            "status": "success",
-            "applications": applications,
-            "count": len(applications)
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.post("/autoagenthire/search-jobs")

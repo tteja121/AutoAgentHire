@@ -316,41 +316,18 @@ async def stop_agent():
 @router.post("/upload-resume")
 async def upload_resume(
     file: UploadFile = File(...),
-    user_email: Optional[str] = Form(None),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Upload and process resume for the authenticated user or provided email.
+    Upload and process resume for the authenticated user.
     Saves the file to uploads/resumes/, persists metadata and parsed data to the database,
     updates candidate user profile with skills and contact details, and returns parsed resume data.
     """
     if not file.filename or not file.filename.lower().endswith(('.pdf', '.docx', '.txt')):
         raise HTTPException(400, "Only PDF, DOCX, and TXT files are supported")
 
-    # Resolve user
     target_user = current_user
-    if not target_user and user_email:
-        clean_email = user_email.strip().lower()
-        target_user = UserRepository.get_by_email(db, email=clean_email)
-        if not target_user:
-            from backend.auth.password import hash_password
-            import uuid as _uuid
-            target_user = UserRepository.create(
-                db,
-                email=clean_email,
-                hashed_password=hash_password(_uuid.uuid4().hex),
-                full_name=clean_email.split("@")[0],
-                role="candidate",
-                is_active=True,
-                is_verified=True,
-            )
-
-    if not target_user:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required. Please log in or provide your email address to upload a resume."
-        )
 
     try:
         # Save file to disk
@@ -493,19 +470,11 @@ async def upload_resume(
 
 @router.get("/user/resumes")
 def get_user_resumes(
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    user_email: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Return all resumes for the authenticated user or provided email."""
-    target_user = current_user
-    if not target_user and user_email:
-        target_user = UserRepository.get_by_email(db, user_email.strip())
-
-    if not target_user:
-        return {"resumes": [], "total": 0}
-
-    user_id_int = int(target_user.id)
+    """Return all resumes for the authenticated user."""
+    user_id_int = getattr(current_user, "id", 0)
     resumes = ResumeRepository.get_all_for_user(db, user_id_int)
     return {
         "resumes": [
@@ -529,8 +498,7 @@ def get_user_resumes(
 
 @router.get("/user/activities")
 def get_user_activities(
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    user_email: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -539,23 +507,16 @@ def get_user_activities(
     - Resumes uploaded / parsed
     - System / profile audit events
     """
-    target_user = current_user
-    if not target_user and user_email:
-        target_user = UserRepository.get_by_email(db, user_email.strip())
-
     activities = []
 
     # 1. Candidate Job Applications
     app_query = db.query(JobApplication, JobPosting).join(
         JobPosting, JobApplication.job_posting_id == JobPosting.id, isouter=True
     )
-    if target_user:
-        app_query = app_query.filter(
-            (JobApplication.candidate_email == target_user.email) |
-            (JobApplication.candidate_id == target_user.id)
-        )
-    elif user_email:
-        app_query = app_query.filter(JobApplication.candidate_email == user_email.strip())
+    app_query = app_query.filter(
+        (JobApplication.candidate_email == current_user.email) |
+        (JobApplication.candidate_id == current_user.id)
+    )
 
     for app, job in app_query.order_by(JobApplication.created_at.desc()).limit(30).all():
         raw_score = app.match_score or 0.92
@@ -577,42 +538,40 @@ def get_user_activities(
         })
 
     # 2. Resumes uploaded
-    if target_user:
-        u_id = int(target_user.id)
-        resumes = ResumeRepository.get_all_for_user(db, u_id)
-        for r in resumes[:15]:
-            skills_list = list(r.skills or [])
-            activities.append({
-                "id": f"resume_{r.id}",
-                "type": "resume_upload",
-                "title": f"Uploaded Resume: {r.filename}",
-                "description": f"Extracted {len(skills_list)} skills and updated candidate profile",
-                "status": "completed",
-                "timestamp": r.created_at.isoformat() if r.created_at else datetime.now(timezone.utc).isoformat(),
-                "meta": {
-                    "resume_id": r.id,
-                    "filename": r.filename,
-                    "skills_count": len(skills_list),
-                }
-            })
+    u_id = getattr(current_user, "id", 0)
+    resumes = ResumeRepository.get_all_for_user(db, u_id)
+    for r in resumes[:15]:
+        skills_list = getattr(r, "skills", None) or []
+        activities.append({
+            "id": f"resume_{r.id}",
+            "type": "resume_upload",
+            "title": f"Uploaded Resume: {r.filename}",
+            "description": f"Extracted {len(skills_list)} skills and updated candidate profile",
+            "status": "completed",
+            "timestamp": r.created_at.isoformat() if r.created_at else datetime.now(timezone.utc).isoformat(),
+            "meta": {
+                "resume_id": r.id,
+                "filename": r.filename,
+                "skills_count": len(skills_list),
+            }
+        })
 
     # 3. Audit logs
-    if target_user:
-        logs = db.query(AuditLog).filter(
-            (AuditLog.user_id == target_user.id) |
-            (AuditLog.performed_by_email == target_user.email)
-        ).order_by(AuditLog.timestamp.desc()).limit(20).all()
-        for log in logs:
-            if log.action != "resume_uploaded":  # avoid duplicate
-                activities.append({
-                    "id": f"audit_{log.id}",
-                    "type": "audit_event",
-                    "title": log.action.replace("_", " ").title(),
-                    "description": f"Event logged for {log.target_type or 'profile'}",
-                    "status": "completed",
-                    "timestamp": log.timestamp.isoformat() if log.timestamp else datetime.now(timezone.utc).isoformat(),
-                    "meta": log.details or {},
-                })
+    logs = db.query(AuditLog).filter(
+        (AuditLog.user_id == current_user.id) |
+        (AuditLog.performed_by_email == current_user.email)
+    ).order_by(AuditLog.timestamp.desc()).limit(20).all()
+    for log in logs:
+        if log.action != "resume_uploaded":  # avoid duplicate
+            activities.append({
+                "id": f"audit_{log.id}",
+                "type": "audit_event",
+                "title": log.action.replace("_", " ").title(),
+                "description": f"Event logged for {log.target_type or 'profile'}",
+                "status": "completed",
+                "timestamp": log.timestamp.isoformat() if log.timestamp else datetime.now(timezone.utc).isoformat(),
+                "meta": log.details or {},
+            })
 
     # Sort all activities chronologically (newest first)
     activities.sort(key=lambda x: x["timestamp"], reverse=True)
@@ -802,38 +761,15 @@ def verify_email_code(
 @router.post("/user/profile")
 def update_user_profile(
     body: UserProfileUpdateRequest,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Save or update user profile fields (name, phone, location, skills, experience,
     avatar_url, education, qualification, job_role, company_name, bio).
-    Supports authenticated users as well as candidates identifying via email.
+    Requires authentication.
     """
     target_user = current_user
-    if not target_user and body.email:
-        clean_email = body.email.strip().lower()
-        target_user = UserRepository.get_by_email(db, clean_email)
-        if not target_user:
-            from backend.auth.password import hash_password
-            import uuid as _uuid
-            target_user = UserRepository.create(
-                db,
-                email=clean_email,
-                hashed_password=hash_password(_uuid.uuid4().hex),
-                full_name=body.full_name or clean_email.split("@")[0],
-                phone=body.phone,
-                location=body.location,
-                role="candidate",
-                is_active=True,
-                is_verified=True,
-            )
-
-    if not target_user:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required or valid candidate email must be provided to update profile."
-        )
 
     # Phone validation
     if body.phone:
@@ -862,7 +798,7 @@ def update_user_profile(
 
                 # Verification check: If verification code is passed, verify it; otherwise require verification process
                 if body.verification_code:
-                    code = str(body.verification_code).strip()
+                    code = body.verification_code.strip()
                     if not target_user.email_verification_code or target_user.email_verification_code != code:
                         raise HTTPException(status_code=400, detail="Invalid verification code. Please check your inbox.")
                     if not target_user.pending_email or target_user.pending_email.lower() != new_email:
@@ -1236,127 +1172,210 @@ async def batch_match_jobs(
 
 @router.get("/applications")
 async def get_applications(
-    user_email: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Get application history from SQLite database (job_candidate_applications and applications),
-    with fallback to applications.json.
+    Get application history for the authenticated user only.
+    - Candidate: only their own applications (matching candidate_id or candidate_email)
+    - Recruiter: only applications for jobs they posted (matching job_posting.recruiter_id)
+    - Authorizer: applications across the system
+    Authentication is required — unauthenticated requests receive 401.
     """
-    try:
-        # Determine effective user / email
-        target_user = current_user
-        if not target_user and user_email:
-            target_user = UserRepository.get_by_email(db, user_email.strip())
+    def _normalize_app_resume_url(raw_url: Optional[str], raw_filename: Optional[str]) -> Optional[str]:
+        if not raw_url and not raw_filename:
+            return None
+        target = raw_filename or (os.path.basename(raw_url) if raw_url else "")
+        if not target:
+            return raw_url
+        clean = os.path.basename(target)
+        return f"/api/recruiter/files/{clean}"
 
+    try:
         formatted_apps = []
 
-        # 1. Query candidate applications from SQLite database
-        query = db.query(JobApplication, JobPosting).join(
-            JobPosting, JobApplication.job_posting_id == JobPosting.id, isouter=True
-        )
-
-        if target_user:
-            query = query.filter(
-                (JobApplication.candidate_email == target_user.email) |
-                (JobApplication.candidate_id == target_user.id)
+        if current_user.role == "candidate":
+            # Candidate: ONLY applications belonging to this candidate
+            query = db.query(JobApplication, JobPosting).join(
+                JobPosting, JobApplication.job_posting_id == JobPosting.id, isouter=True
+            ).filter(
+                (JobApplication.candidate_id == current_user.id) |
+                (JobApplication.candidate_email.ilike(current_user.email))
             )
-        elif user_email:
-            query = query.filter(JobApplication.candidate_email == user_email.strip())
+            if status and status.lower() != "all":
+                query = query.filter(JobApplication.status == status.lower())
+            candidate_apps = query.order_by(JobApplication.created_at.desc()).limit(limit).all()
 
-        if status and status.lower() != "all":
-            query = query.filter(JobApplication.status == status.lower())
-
-        candidate_apps = query.order_by(JobApplication.created_at.desc()).limit(limit).all()
-
-        for app, job in candidate_apps:
-            raw_score = app.match_score or 0.92
-            score_pct = int(raw_score * 100) if raw_score <= 1.0 else int(raw_score)
-            formatted_apps.append({
-                "id": app.id,
-                "title": job.title if job else "Software Engineer",
-                "job_title": job.title if job else "Software Engineer",
-                "company": job.company_name if job else "AutoAgentHire Partner",
-                "company_name": job.company_name if job else "AutoAgentHire Partner",
-                "url": f"/candidate/jobs",
-                "job_url": f"/candidate/jobs",
-                "status": app.status or "applied",
-                "applied_date": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
-                "applied_at": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
-                "match_score": score_pct,
-                "candidate_name": app.candidate_name,
-                "candidate_email": app.candidate_email,
-                "candidate_phone": app.candidate_phone,
-                "resume_url": app.resume_url,
-                "resume_filename": app.resume_filename,
-                "cv_url": app.cv_url,
-                "cv_filename": app.cv_filename,
-                "location": job.location if job else "Remote",
-                "salary": job.salary_description if job else "Competitive",
-                "interview_scheduled_at": app.interview_scheduled_at.isoformat() if getattr(app, "interview_scheduled_at", None) else None,
-                "interview_meeting_link": getattr(app, "interview_meeting_link", None),
-                "interview_round": getattr(app, "interview_round", None),
-                "interview_notes": getattr(app, "interview_notes", None) or getattr(app, "recruiter_notes", None),
-            })
-
-        # 2. Also query bot/agent runs applications if any exist
-        try:
-            bot_db_apps = db.query(Application).limit(limit).all()
-            for b_app in bot_db_apps:
-                raw_score = float(b_app.match_score) if b_app.match_score is not None else 90.0
+            for app, job in candidate_apps:
+                raw_score = app.match_score or 0.92
                 score_pct = int(raw_score * 100) if raw_score <= 1.0 else int(raw_score)
                 formatted_apps.append({
-                    "id": b_app.id + 10000,
-                    "title": b_app.job_title or "Position",
-                    "job_title": b_app.job_title or "Position",
-                    "company": b_app.company_name or "Company",
-                    "company_name": b_app.company_name or "Company",
-                    "url": b_app.job_url or "/candidate/jobs",
-                    "job_url": b_app.job_url or "/candidate/jobs",
-                    "status": b_app.status or "applied",
-                    "applied_date": datetime.now(timezone.utc).isoformat(),
-                    "applied_at": datetime.now(timezone.utc).isoformat(),
+                    "id": app.id,
+                    "title": job.title if job else "Software Engineer",
+                    "job_title": job.title if job else "Software Engineer",
+                    "company": job.company_name if job else "AutoAgentHire Partner",
+                    "company_name": job.company_name if job else "AutoAgentHire Partner",
+                    "url": "/candidate/jobs",
+                    "job_url": "/candidate/jobs",
+                    "status": app.status or "applied",
+                    "applied_date": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
+                    "applied_at": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
                     "match_score": score_pct,
+                    "candidate_name": app.candidate_name,
+                    "candidate_email": app.candidate_email,
+                    "candidate_phone": app.candidate_phone,
+                    "resume_url": _normalize_app_resume_url(app.resume_url, app.resume_filename),
+                    "resume_filename": app.resume_filename,
+                    "cv_url": _normalize_app_resume_url(app.cv_url, app.cv_filename),
+                    "cv_filename": app.cv_filename,
+                    "location": job.location if job else "Remote",
+                    "salary": job.salary_description if job else "Competitive",
+                    "interview_scheduled_at": app.interview_scheduled_at.isoformat() if getattr(app, "interview_scheduled_at", None) else None,
+                    "interview_meeting_link": getattr(app, "interview_meeting_link", None),
+                    "interview_round": getattr(app, "interview_round", None),
+                    "interview_notes": getattr(app, "interview_notes", None) or getattr(app, "recruiter_notes", None),
                 })
-        except Exception as b_err:
-            logger.debug(f"Bot db applications query note: {b_err}")
 
-        # 3. Fallback / supplementary JSON applications file
-        applications_file = Path("data") / "applications.json"
-        if applications_file.exists():
+            # Bot / agent runs applications belonging to this candidate
             try:
-                with open(applications_file, 'r') as f:
-                    all_json_apps = json.load(f)
-
-                if user_email:
-                    all_json_apps = [a for a in all_json_apps if a.get("user_id") == user_email]
-                if status and status.lower() != "all":
-                    all_json_apps = [a for a in all_json_apps if a.get("result", {}).get("status") == status.lower()]
-
-                for a in all_json_apps[:limit]:
-                    res = a.get("result", {})
+                from backend.database.models_complete import AgentRun
+                bot_db_apps = (
+                    db.query(Application)
+                    .join(AgentRun, Application.agent_run_id == AgentRun.id)
+                    .filter(AgentRun.user_id == current_user.id)
+                    .limit(limit)
+                    .all()
+                )
+                for b_app in bot_db_apps:
+                    raw_val = getattr(b_app, "match_score", None)
+                    raw_score = float(raw_val) if raw_val is not None else 90.0
+                    score_pct = int(raw_score * 100) if raw_score <= 1.0 else int(raw_score)
                     formatted_apps.append({
-                        "id": abs(hash(res.get("url", ""))) % 1000000,
-                        "title": res.get("title", "Unknown Position"),
-                        "job_title": res.get("title", "Unknown Position"),
-                        "company": res.get("company", "Unknown Company"),
-                        "company_name": res.get("company", "Unknown Company"),
-                        "url": res.get("url", "/candidate/jobs"),
-                        "job_url": res.get("url", "/candidate/jobs"),
-                        "status": res.get("status", "applied"),
-                        "applied_date": res.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                        "applied_at": res.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                        "match_score": res.get("match_score", 90),
-                        "interview_meeting_link": res.get("interview_meeting_link"),
-                        "interview_scheduled_at": res.get("interview_scheduled_at"),
-                        "interview_round": res.get("interview_round"),
-                        "interview_notes": res.get("interview_notes"),
+                        "id": b_app.id + 10000,
+                        "title": b_app.job_title or "Position",
+                        "job_title": b_app.job_title or "Position",
+                        "company": b_app.company_name or "Company",
+                        "company_name": b_app.company_name or "Company",
+                        "url": b_app.job_url or "/candidate/jobs",
+                        "job_url": b_app.job_url or "/candidate/jobs",
+                        "status": b_app.status or "applied",
+                        "applied_date": b_app.created_at.isoformat() if getattr(b_app, "created_at", None) else datetime.now(timezone.utc).isoformat(),
+                        "applied_at": b_app.created_at.isoformat() if getattr(b_app, "created_at", None) else datetime.now(timezone.utc).isoformat(),
+                        "match_score": score_pct,
+                        "candidate_name": current_user.full_name or "Candidate",
+                        "candidate_email": current_user.email,
                     })
-            except Exception as j_err:
-                logger.warning(f"Failed to read applications.json: {j_err}")
+            except Exception as b_err:
+                logger.debug(f"Bot db applications query note: {b_err}")
+
+            # Fallback JSON file - ONLY include entries explicitly matching current_user.email
+            applications_file = Path("data") / "applications.json"
+            if applications_file.exists():
+                try:
+                    with open(applications_file, 'r') as f:
+                        all_json_apps = json.load(f)
+                    user_json_apps = [
+                        a for a in all_json_apps
+                        if (a.get("user_id") and str(a.get("user_id")).strip().lower() == current_user.email.lower()) or
+                           (a.get("result", {}).get("candidate_email") and str(a.get("result", {}).get("candidate_email")).strip().lower() == current_user.email.lower())
+                    ]
+                    if status and status.lower() != "all":
+                        user_json_apps = [a for a in user_json_apps if a.get("result", {}).get("status") == status.lower()]
+
+                    # Avoid duplicate if already loaded from DB
+                    existing_titles = {(a.get("title", "") + "::" + a.get("company", "")).lower() for a in formatted_apps}
+                    for a in user_json_apps[:limit]:
+                        res = a.get("result", {})
+                        t_key = (res.get("title", "") + "::" + res.get("company", "")).lower()
+                        if t_key in existing_titles:
+                            continue
+                        formatted_apps.append({
+                            "id": abs(hash(res.get("url", ""))) % 1000000,
+                            "title": res.get("title", "Unknown Position"),
+                            "job_title": res.get("title", "Unknown Position"),
+                            "company": res.get("company", "Unknown Company"),
+                            "company_name": res.get("company", "Unknown Company"),
+                            "url": res.get("url", "/candidate/jobs"),
+                            "job_url": res.get("url", "/candidate/jobs"),
+                            "status": res.get("status", "applied"),
+                            "applied_date": res.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "applied_at": res.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "match_score": res.get("match_score", 90),
+                            "candidate_name": res.get("candidate_name") or current_user.full_name or "Candidate",
+                            "candidate_email": res.get("candidate_email") or a.get("user_id") or current_user.email,
+                            "interview_meeting_link": res.get("interview_meeting_link"),
+                            "interview_scheduled_at": res.get("interview_scheduled_at"),
+                            "interview_round": res.get("interview_round"),
+                            "interview_notes": res.get("interview_notes"),
+                        })
+                except Exception as j_err:
+                    logger.warning(f"Failed to read applications.json: {j_err}")
+
+        elif current_user.role == "recruiter":
+            # Recruiter: only applications for their posted jobs
+            query = db.query(JobApplication, JobPosting).join(
+                JobPosting, JobApplication.job_posting_id == JobPosting.id
+            ).filter(JobPosting.recruiter_id == current_user.id)
+            if status and status.lower() != "all":
+                query = query.filter(JobApplication.status == status.lower())
+            for app, job in query.order_by(JobApplication.created_at.desc()).limit(limit).all():
+                raw_score = app.match_score or 0.92
+                score_pct = int(raw_score * 100) if raw_score <= 1.0 else int(raw_score)
+                formatted_apps.append({
+                    "id": app.id,
+                    "title": job.title,
+                    "job_title": job.title,
+                    "company": job.company_name,
+                    "company_name": job.company_name,
+                    "url": "/candidate/jobs",
+                    "job_url": "/candidate/jobs",
+                    "status": app.status or "applied",
+                    "applied_date": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
+                    "applied_at": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
+                    "match_score": score_pct,
+                    "candidate_name": app.candidate_name,
+                    "candidate_email": app.candidate_email,
+                    "candidate_phone": app.candidate_phone,
+                    "resume_url": _normalize_app_resume_url(app.resume_url, app.resume_filename),
+                    "interview_scheduled_at": app.interview_scheduled_at.isoformat() if getattr(app, "interview_scheduled_at", None) else None,
+                    "interview_meeting_link": getattr(app, "interview_meeting_link", None),
+                    "interview_round": getattr(app, "interview_round", None),
+                    "interview_notes": getattr(app, "interview_notes", None) or getattr(app, "recruiter_notes", None),
+                })
+
+        elif current_user.role == "authorizer":
+            # Authorizer: system-level view
+            query = db.query(JobApplication, JobPosting).join(
+                JobPosting, JobApplication.job_posting_id == JobPosting.id, isouter=True
+            )
+            if status and status.lower() != "all":
+                query = query.filter(JobApplication.status == status.lower())
+            for app, job in query.order_by(JobApplication.created_at.desc()).limit(limit).all():
+                raw_score = app.match_score or 0.92
+                score_pct = int(raw_score * 100) if raw_score <= 1.0 else int(raw_score)
+                formatted_apps.append({
+                    "id": app.id,
+                    "title": job.title if job else "Software Engineer",
+                    "job_title": job.title if job else "Software Engineer",
+                    "company": job.company_name if job else "AutoAgentHire Partner",
+                    "company_name": job.company_name if job else "AutoAgentHire Partner",
+                    "url": "/candidate/jobs",
+                    "job_url": "/candidate/jobs",
+                    "status": app.status or "applied",
+                    "applied_date": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
+                    "applied_at": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
+                    "match_score": score_pct,
+                    "candidate_name": app.candidate_name,
+                    "candidate_email": app.candidate_email,
+                    "candidate_phone": app.candidate_phone,
+                    "resume_url": _normalize_app_resume_url(app.resume_url, app.resume_filename),
+                    "interview_scheduled_at": app.interview_scheduled_at.isoformat() if getattr(app, "interview_scheduled_at", None) else None,
+                    "interview_meeting_link": getattr(app, "interview_meeting_link", None),
+                    "interview_round": getattr(app, "interview_round", None),
+                    "interview_notes": getattr(app, "interview_notes", None) or getattr(app, "recruiter_notes", None),
+                })
 
         return {
             "applications": formatted_apps[:limit],

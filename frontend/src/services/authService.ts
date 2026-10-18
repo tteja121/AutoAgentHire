@@ -42,8 +42,50 @@ function notifyAuthSubscribers(event: string, session: any) {
   });
 }
 
+export function clearAllAccountData() {
+  const keysToRemove = [
+    'authToken',
+    'userRole',
+    'candidate_email',
+    'candidate_name',
+    'candidate_phone',
+    'candidate_location',
+    'candidate_headline',
+    'candidate_avatar_url',
+    'candidate_experience',
+    'candidate_summary',
+    'candidate_skills',
+    'candidate_skills_str',
+    'candidate_resume_name',
+    'candidate_profile',
+    'client_applied_applications',
+    'userProfile',
+    'resumeData',
+    'resumePath',
+    'jobSearchConfig',
+    // Legacy API keys — must not persist across accounts
+    'GEMINI_API_KEY',
+    'GROQ_API_KEY',
+    'OPENAI_API_KEY',
+  ];
+  keysToRemove.forEach((k) => localStorage.removeItem(k));
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('client_applied_') || key.startsWith('candidate_') || key.startsWith('cached_apps_'))) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch (e) {}
+
+  try {
+    sessionStorage.clear();
+  } catch (e) {}
+}
+
 export const authService = {
   isPersonalEmail,
+  clearAllAccountData,
 
   /**
    * Register a new user with Backend Auth and initialize profile
@@ -87,8 +129,10 @@ export const authService = {
 
     const bData = await res.json();
     if (bData.access_token) {
+      clearAllAccountData();
       localStorage.setItem('authToken', bData.access_token);
       localStorage.setItem('userRole', role);
+      localStorage.setItem('candidate_email', params.email.trim().toLowerCase());
       notifyAuthSubscribers('SIGNED_IN', { access_token: bData.access_token, user: bData });
     }
 
@@ -100,7 +144,54 @@ export const authService = {
       },
       custom_user_id: bData.custom_user_id || null,
       session: bData.access_token ? { access_token: bData.access_token } : null,
+      requires_otp: Boolean(bData.requires_otp),
+      message: bData.message,
+      email: bData.email || params.email,
     };
+  },
+
+  /**
+   * Verify 6-digit OTP code to activate Client account
+   */
+  async verifySignupOtp(email: string, code: string) {
+    const res = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase(), code: code.trim() }),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.detail || 'Verification failed. Please check your code.');
+    }
+
+    const data = await res.json();
+    if (data.access_token) {
+      clearAllAccountData();
+      localStorage.setItem('authToken', data.access_token);
+      localStorage.setItem('userRole', data.role || 'candidate');
+      localStorage.setItem('candidate_email', email.trim().toLowerCase());
+      notifyAuthSubscribers('SIGNED_IN', { access_token: data.access_token, user: data });
+    }
+    return data;
+  },
+
+  /**
+   * Resend 6-digit verification code
+   */
+  async resendSignupOtp(email: string) {
+    const res = await fetch(`${API_BASE_URL}/auth/resend-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.detail || 'Failed to resend verification code.');
+    }
+
+    return await res.json();
   },
 
   /**
@@ -189,8 +280,10 @@ export const authService = {
     const effectiveRole = backendResult.role || targetRole || resolvedRole || 'candidate';
 
     if (backendResult.access_token) {
+      clearAllAccountData();
       localStorage.setItem('authToken', backendResult.access_token);
       localStorage.setItem('userRole', effectiveRole);
+      localStorage.setItem('candidate_email', emailToAuth.trim().toLowerCase());
       notifyAuthSubscribers('SIGNED_IN', { access_token: backendResult.access_token, user: backendResult });
     }
 
@@ -200,6 +293,10 @@ export const authService = {
         id: backendResult.id || backendResult.uuid,
         email: emailToAuth,
         full_name: backendResult.full_name,
+        user_metadata: {
+          full_name: backendResult.full_name,
+          role: effectiveRole,
+        },
       },
       profile: {
         id: backendResult.id || backendResult.uuid,
@@ -230,8 +327,12 @@ export const authService = {
     const data = await res.json();
     const role = data.role || 'candidate';
     if (data.access_token) {
+      clearAllAccountData();
       localStorage.setItem('authToken', data.access_token);
       localStorage.setItem('userRole', role);
+      if (data.email) {
+        localStorage.setItem('candidate_email', data.email.trim().toLowerCase());
+      }
       notifyAuthSubscribers('SIGNED_IN', { access_token: data.access_token, user: data });
     }
     return data;
@@ -252,15 +353,17 @@ export const authService = {
   },
 
   /**
-   * Sign out: clear session tokens and notify subscribers
+   * Sign out: clear session tokens, account data, and notify subscribers
    */
   async signOut() {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('userRole');
+    clearAllAccountData();
     try {
       await fetch(`${API_BASE_URL}/auth/logout`, { method: 'POST' }).catch(() => {});
     } catch (_) {}
     notifyAuthSubscribers('SIGNED_OUT', null);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('authLogout'));
+    }
   },
 
   /**

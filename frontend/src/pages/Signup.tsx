@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
-import { Bot, Mail, Lock, User, Eye, EyeOff, ArrowRight, Briefcase, ShieldCheck } from "lucide-react";
+import { Bot, Mail, Lock, User, Eye, EyeOff, ArrowRight, Briefcase, ShieldCheck, KeyRound, RotateCw, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -37,6 +37,16 @@ const Signup = () => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmittedSuccess, setIsSubmittedSuccess] = useState(false);
+
+  // OTP Verification States
+  const [isOtpStep, setIsOtpStep] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(60);
+  const [isResending, setIsResending] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -44,6 +54,17 @@ const Signup = () => {
     confirmPassword: "",
     agreeTerms: false,
   });
+
+  // Countdown timer for OTP resend
+  useEffect(() => {
+    let timer: any;
+    if (isOtpStep && resendCooldown > 0) {
+      timer = setInterval(() => {
+        setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [isOtpStep, resendCooldown]);
 
   // Explicitly ensure form is clean and unpolluted by browser autofill on load
   useEffect(() => {
@@ -137,19 +158,62 @@ const Signup = () => {
     setIsLoading(true);
 
     try {
-      await authService.signUp({
+      const res = await authService.signUp({
         email: formData.email,
         password: formData.password,
         fullName: formData.name,
         role: "candidate",
       });
 
-      setIsSubmittedSuccess(true);
+      if (res?.requires_otp) {
+        setIsOtpStep(true);
+        setOtpError(null);
+        setResendCooldown(60);
+      } else {
+        setIsSubmittedSuccess(true);
+      }
     } catch (err: any) {
       const msg = err?.message || "Signup failed. Please try again.";
       setError(msg);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpCode || otpCode.trim().length < 6) {
+      setOtpError("Please enter the complete 6-digit verification code.");
+      return;
+    }
+
+    setOtpLoading(true);
+    setOtpError(null);
+
+    try {
+      await authService.verifySignupOtp(formData.email, otpCode);
+      navigate("/dashboard");
+    } catch (err: any) {
+      setOtpError(err?.message || "Invalid verification code. Please check your email and try again.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0 || isResending) return;
+    setIsResending(true);
+    setOtpError(null);
+    setResendSuccess(null);
+
+    try {
+      const res = await authService.resendSignupOtp(formData.email);
+      setResendSuccess(res?.message || "A new 6-digit code has been dispatched to your email.");
+      setResendCooldown(60);
+    } catch (err: any) {
+      setOtpError(err?.message || "Failed to resend verification code.");
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -205,7 +269,122 @@ const Signup = () => {
             <span className="text-xl font-bold">AutoAgentHire</span>
           </Link>
 
-          {isSubmittedSuccess ? (
+          {isOtpStep ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="p-8 rounded-2xl bg-card border border-border shadow-xl space-y-6"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/20 to-blue-500/20 border border-primary/30 text-primary mx-auto flex items-center justify-center">
+                <ShieldCheck className="w-8 h-8 text-primary" />
+              </div>
+              <div className="text-center space-y-2">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold uppercase tracking-wider">
+                  <KeyRound className="w-3.5 h-3.5" />
+                  Client Account Verification
+                </div>
+                <h2 className="text-2xl font-bold">Verify Your Email</h2>
+                <p className="text-muted-foreground text-sm">
+                  We sent a 6-digit verification code to
+                </p>
+                <div className="font-semibold text-foreground text-sm break-all bg-muted/50 px-3 py-1 rounded-lg inline-block border border-border">
+                  {formData.email}
+                </div>
+              </div>
+
+              <form onSubmit={handleVerifyOtp} className="space-y-4">
+                {otpError && (
+                  <div className="p-3.5 rounded-xl bg-destructive/10 border border-destructive/25 text-destructive text-sm flex items-start gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-destructive mt-2 shrink-0" />
+                    <div>{otpError}</div>
+                  </div>
+                )}
+
+                {resendSuccess && (
+                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-sm flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-400" />
+                    <div>{resendSuccess}</div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block text-center">
+                    Enter 6-Digit Code
+                  </label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    value={otpCode}
+                    onChange={(e) => {
+                      setOtpError(null);
+                      setOtpCode(e.target.value.replace(/\D/g, ""));
+                    }}
+                    placeholder="------"
+                    className="text-center font-mono text-2xl tracking-[0.4em] font-extrabold h-14 bg-background border-primary/30 focus-visible:ring-primary"
+                    autoFocus
+                  />
+                  <p className="text-xs text-center text-muted-foreground">
+                    Code valid for 15 minutes
+                  </p>
+                </div>
+
+                <Button
+                  type="submit"
+                  variant="hero"
+                  size="lg"
+                  className="w-full font-semibold shadow-md gap-2 h-12"
+                  disabled={otpLoading || otpCode.length < 6}
+                >
+                  {otpLoading ? (
+                    <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <span>Verify & Activate Account</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </Button>
+              </form>
+
+              <div className="pt-2 text-center text-xs space-y-3">
+                <div className="text-muted-foreground">
+                  Didn't receive the email?{" "}
+                  {resendCooldown > 0 ? (
+                    <span className="text-muted-foreground font-medium">
+                      Resend in {resendCooldown}s
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      disabled={isResending}
+                      className="text-primary hover:underline font-semibold inline-flex items-center gap-1"
+                    >
+                      {isResending && <RotateCw className="w-3 h-3 animate-spin" />}
+                      Resend Code
+                    </button>
+                  )}
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOtpStep(false);
+                      setOtpError(null);
+                      setResendSuccess(null);
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    ← Edit registration details
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ) : isSubmittedSuccess ? (
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}

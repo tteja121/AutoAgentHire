@@ -184,15 +184,17 @@ const JobSearchConfig = () => {
 
   const handleOpenApplyModal = (job: ScoredJob) => {
     const cached = getCandidateProfile();
-    setSelectedJobForModal(job);
+    const userEmail = (localStorage.getItem("candidate_email") || localStorage.getItem("user_email") || cached.email || "").trim();
+    const userName = (cached.candidate_name || localStorage.getItem("candidate_name") || "").trim();
+    const userPhone = (cached.phone || localStorage.getItem("candidate_phone") || "").trim();
     setCandidateModalForm({
-      name: cached.candidate_name || localStorage.getItem("candidate_name") || "Alex Rivera",
-      email: cached.email || localStorage.getItem("candidate_email") || "alex@example.com",
-      phone: cached.phone || localStorage.getItem("candidate_phone") || "+1 (555) 234-5678",
+      name: userName || "Candidate",
+      email: userEmail,
+      phone: userPhone,
       education: "Bachelor of Technology in Computer Science",
       qualification: "B.Tech CSE / Graduate",
       jobRole: cached.headline || "Full Stack Software Engineer",
-      coverLetter: `Dear Hiring Team at ${job.company_name || job.company},\n\nI am excited to apply for the ${job.title} position. With my background and relevant skills, I am confident in adding significant value to your team.\n\nBest regards,\n${cached.candidate_name || localStorage.getItem("candidate_name") || "Candidate"}`,
+      coverLetter: `Dear Hiring Team at ${job.company_name || job.company},\n\nI am excited to apply for the ${job.title} position. With my background and relevant skills, I am confident in adding significant value to your team.\n\nBest regards,\n${userName || "Candidate"}`,
     });
     setIsApplyModalOpen(true);
   };

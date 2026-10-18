@@ -28,7 +28,8 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 from typing import Optional, Dict, Any
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
+from sqlalchemy.orm import Session
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,7 +48,7 @@ from backend.routes.auth_routes import router as auth_router
 from backend.routes.recruiter_routes import router as recruiter_router
 from backend.routes.mongo_routes import router as mongo_router
 from backend.database.mongo import mongo_manager
-from backend.database.connection import init_db
+from backend.database.connection import init_db, get_db
 
 # Heavy agent/ML routes — imported lazily so a missing dep doesn't break startup
 agent_router = None
@@ -86,15 +87,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[WARN] Database initialization failed; continuing startup: {e}")
 
-    # Initialize MongoDB Atlas connection
+    # Initialize MongoDB Atlas connection (optional document store)
     try:
-        mongo_ok = await asyncio.to_thread(mongo_manager.connect)
+        mongo_ok = await asyncio.wait_for(asyncio.to_thread(mongo_manager.connect), timeout=10.0)
         if mongo_ok:
             print("✓ MongoDB Atlas connected successfully")
         else:
-            print("[WARN] MongoDB Atlas connection check returned false; will retry on demand")
+            print("ℹ Operating on primary SQLite database (MongoDB Atlas optional mirror offline)")
+    except asyncio.TimeoutError:
+        print("ℹ MongoDB Atlas connection timed out; operating on primary SQLite database")
     except Exception as e:
-        print(f"[WARN] MongoDB Atlas connection initialization failed: {e}")
+        print(f"ℹ MongoDB Atlas note: {e}")
     
     # TODO: Initialize vector store
     # TODO: Start background scheduler
@@ -157,9 +160,8 @@ cors_params = {
     "allow_credentials": True,
     "allow_methods": ["*"],
     "allow_headers": ["*"],
+    "allow_origin_regex": r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://.*\.vercel\.app$",
 }
-if _is_development:
-    cors_params["allow_origin_regex"] = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
 app.add_middleware(
     CORSMiddleware,
@@ -182,6 +184,25 @@ app.include_router(autoagenthire_router)
 app.include_router(mongo_router)
 if v2_router is not None:
     app.include_router(v2_router)  # V2 API for frontend
+
+# Legacy backward-compatibility endpoint for resume URLs pointing to /uploads/resumes/...
+from backend.routes.recruiter_routes import serve_file
+
+@app.get("/uploads/resumes/{filename:path}")
+def legacy_uploads_resumes_handler(
+    filename: str,
+    request: Request,
+    token: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Backward-compatibility route for legacy /uploads/resumes/... URLs.
+    Transparently delegates to serve_file with prefix matching and token authentication.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not token and auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+    return serve_file(filename=filename, token=token, auth_header_user=None, db=db)
 
 # Mount static files directory for uploaded resumes and documents
 from fastapi.staticfiles import StaticFiles
@@ -238,5 +259,16 @@ if __name__ == "__main__":
         host=settings.API_HOST,
         port=settings.API_PORT,
         reload=settings.API_RELOAD,
+        reload_dirs=["backend"] if settings.API_RELOAD else None,
+        reload_excludes=[
+            "*.db*",
+            "data/*",
+            "uploads/*",
+            "frontend/*",
+            "*.log",
+            "*.tmp",
+            "**/.pytest_cache/**",
+            "**/__pycache__/**",
+        ] if settings.API_RELOAD else None,
         log_level=settings.LOG_LEVEL.lower(),
     )

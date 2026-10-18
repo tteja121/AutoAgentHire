@@ -19,6 +19,7 @@ from pypdf import PdfReader
 from backend.database.connection import get_db
 from backend.database.models_complete import JobPosting, JobApplication, User, AuditLog
 from backend.llm.gemini_service import get_gemini_service
+from backend.auth.dependencies import get_current_user, get_current_user_optional
 
 # Lazy imports — do NOT load sklearn/numpy at module level (causes OOM on low-memory servers)
 # They are imported inside the endpoint function that actually needs them.
@@ -274,7 +275,11 @@ class BatchApplyRequest(BaseModel):
 
 @router.post("/apply-all", status_code=200)
 @router.post("/apply-single", status_code=200)
-async def apply_all_jobs(body: BatchApplyRequest, db: Session = Depends(get_db)):
+async def apply_all_jobs(
+    body: BatchApplyRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """
     Apply candidate to one or more jobs from resume match analysis.
     Stores the application in database and sends a personalized thank you email
@@ -287,16 +292,18 @@ async def apply_all_jobs(body: BatchApplyRequest, db: Session = Depends(get_db))
     import logging as _logging
     _logger = _logging.getLogger(__name__)
 
-    clean_email = (body.candidate_email or "").strip().lower()
-    clean_name = (body.candidate_name or "").strip() or "Applicant"
-    clean_phone = (body.candidate_phone or "").strip()
+    # Use authenticated user identity — never trust request body for ownership
+    clean_email = current_user.email.strip().lower()
+    clean_name = (current_user.full_name or body.candidate_name or current_user.email.split("@")[0]).strip()
+    clean_phone = (current_user.phone or body.candidate_phone or "").strip()
+
     clean_exp = (body.candidate_experience or "").strip()
     resume_name = (body.resume_name or "").strip() or "Resume.pdf"
 
     if not validate_email_address(clean_email):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid candidate email address: '{body.candidate_email}'. Please provide a valid email.",
+            detail=f"Invalid candidate email address: '{clean_email}'. Please provide a valid email.",
         )
 
     # Compile the list of jobs to apply to
@@ -448,7 +455,7 @@ async def apply_all_jobs(body: BatchApplyRequest, db: Session = Depends(get_db))
                 app_record.candidate_phone = clean_phone
             if resume_name:
                 app_record.resume_filename = resume_name
-                app_record.resume_url = f"/uploads/resumes/{resume_name}"
+                app_record.resume_url = f"/api/recruiter/files/{resume_name}"
             app_record.match_score = score_float
             db.commit()
             db.refresh(app_record)
@@ -460,7 +467,7 @@ async def apply_all_jobs(body: BatchApplyRequest, db: Session = Depends(get_db))
                 candidate_email=clean_email,
                 candidate_phone=clean_phone or None,
                 resume_filename=resume_name,
-                resume_url=f"/uploads/resumes/{resume_name}",
+                resume_url=f"/api/recruiter/files/{resume_name}",
                 cover_letter=body.cover_letter or f"Application for {j_title} at {j_company}. Experience: {clean_exp}",
                 status="applied",
                 match_score=score_float,
@@ -559,6 +566,7 @@ async def apply_all_jobs(body: BatchApplyRequest, db: Session = Depends(get_db))
 async def parse_resume(
     file: UploadFile = File(...),
     job_description: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """

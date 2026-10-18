@@ -27,6 +27,7 @@ export interface AppliedJobRecord {
   candidate_name?: string;
   candidate_email?: string;
   candidate_phone?: string;
+  experience?: string;
   location?: string;
   resume_filename?: string;
   resume_url?: string;
@@ -74,14 +75,20 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
     ''
   ).trim();
 
-  // 3. Resolve Email
+  // 3. Resolve Email - PRESERVE authenticated user's official email address!
+  const authenticatedEmail = (
+    localStorage.getItem('candidate_email') ||
+    localStorage.getItem('user_email') ||
+    ''
+  ).trim().toLowerCase();
+
   const email = (
+    authenticatedEmail ||
     data.email ||
     contact.email ||
     parsed.email ||
-    localStorage.getItem('candidate_email') ||
     ''
-  ).trim();
+  ).trim().toLowerCase();
 
   // 4. Resolve Phone
   const phone = (
@@ -156,7 +163,12 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
   // Persist directly to localStorage keys
   try {
     if (name) localStorage.setItem('candidate_name', name);
-    if (email) localStorage.setItem('candidate_email', email);
+    if (authenticatedEmail) {
+      localStorage.setItem('candidate_email', authenticatedEmail);
+      localStorage.setItem('user_email', authenticatedEmail);
+    } else if (email) {
+      localStorage.setItem('candidate_email', email);
+    }
     if (phone) localStorage.setItem('candidate_phone', phone);
     if (location) localStorage.setItem('candidate_location', location);
     if (extractedSkills.length > 0) {
@@ -242,12 +254,29 @@ export function getCandidateProfile(): CandidateProfile {
   };
 }
 
+export function getClientAppliedStorageKey(): string {
+  const email = (
+    localStorage.getItem('candidate_email') ||
+    localStorage.getItem('user_email') ||
+    ''
+  ).trim().toLowerCase();
+  return email ? `client_applied_applications_${email}` : 'client_applied_applications_guest';
+}
+
 /**
  * Store applied job into client local storage and dispatch update event.
  */
 export function saveClientAppliedJob(job: Partial<AppliedJobRecord>): AppliedJobRecord {
   const profile = getCandidateProfile();
+  const currentEmail = (
+    localStorage.getItem('candidate_email') ||
+    localStorage.getItem('user_email') ||
+    profile.email ||
+    ''
+  ).trim().toLowerCase();
+
   const appId = job.id || Date.now();
+  const effectiveEmail = (job.candidate_email || currentEmail || '').trim().toLowerCase();
 
   const record: AppliedJobRecord = {
     id: appId,
@@ -258,7 +287,7 @@ export function saveClientAppliedJob(job: Partial<AppliedJobRecord>): AppliedJob
     applied_date: job.applied_date || new Date().toISOString(),
     match_score: job.match_score || 92,
     candidate_name: job.candidate_name || profile.candidate_name || 'Candidate',
-    candidate_email: job.candidate_email || profile.email || 'candidate@example.com',
+    candidate_email: effectiveEmail,
     candidate_phone: job.candidate_phone || profile.phone || '',
     location: job.location || profile.location || 'Remote',
     resume_filename: job.resume_filename || profile.resume_name || 'resume.pdf',
@@ -266,7 +295,8 @@ export function saveClientAppliedJob(job: Partial<AppliedJobRecord>): AppliedJob
   };
 
   try {
-    const existingRaw = localStorage.getItem('client_applied_applications');
+    const storageKey = effectiveEmail ? `client_applied_applications_${effectiveEmail}` : getClientAppliedStorageKey();
+    const existingRaw = localStorage.getItem(storageKey);
     let existingList: AppliedJobRecord[] = [];
     if (existingRaw) {
       try {
@@ -285,7 +315,12 @@ export function saveClientAppliedJob(job: Partial<AppliedJobRecord>): AppliedJob
     // Prepend newest application
     existingList.unshift(record);
 
-    localStorage.setItem('client_applied_applications', JSON.stringify(existingList));
+    localStorage.setItem(storageKey, JSON.stringify(existingList));
+
+    // Clear legacy un-isolated storage key to avoid cross-account leakage
+    try {
+      localStorage.removeItem('client_applied_applications');
+    } catch {}
 
     // Dispatch event so Applications page and other active components update in real-time
     window.dispatchEvent(new CustomEvent('applicationSubmitted', { detail: record }));
@@ -297,15 +332,29 @@ export function saveClientAppliedJob(job: Partial<AppliedJobRecord>): AppliedJob
 }
 
 /**
- * Retrieve list of client applied applications from local storage.
+ * Retrieve list of client applied applications from local storage (scoped strictly to current account).
  */
 export function getClientAppliedJobs(): AppliedJobRecord[] {
+  const currentEmail = (
+    localStorage.getItem('candidate_email') ||
+    localStorage.getItem('user_email') ||
+    ''
+  ).trim().toLowerCase();
+
+  // If user is not logged in with an official email, return empty list immediately to guarantee privacy!
+  if (!currentEmail) return [];
+
+  const storageKey = `client_applied_applications_${currentEmail}`;
   try {
-    const raw = localStorage.getItem('client_applied_applications');
+    const raw = localStorage.getItem(storageKey);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed;
+        // STRICT isolation: ONLY return applications where candidate_email is explicitly defined AND matches current logged in user
+        return parsed.filter(item => {
+          if (!item || !item.candidate_email) return false;
+          return item.candidate_email.trim().toLowerCase() === currentEmail;
+        });
       }
     }
   } catch (e) {

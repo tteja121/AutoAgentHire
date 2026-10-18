@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
+    SQL_ECHO: bool = False
     
     # API
     API_HOST: str = "0.0.0.0"
@@ -182,8 +183,11 @@ class Settings(BaseSettings):
     REACT_APP_API_URL: str = "http://localhost:8000"
 
     # CORS - stored as comma-separated string in .env, parsed to list
-    # Include both localhost and 127.0.0.1 for dev servers (Vite often runs on 127.0.0.1).
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8501"
+    # Include localhost/127.0.0.1, Vite 5173, and production Vercel frontend
+    CORS_ORIGINS: str = (
+        "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,"
+        "http://localhost:5173,http://localhost:8501,https://auto-agent-hire.vercel.app"
+    )
     
     @property
     def cors_origins_list(self) -> List[str]:

@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { API_BASE_URL } from '@/lib/api';
+import { API_BASE_URL, getAuthenticatedFileUrl } from '@/lib/api';
 import { applicationService } from '@/services/applicationService';
 import { applyProfileFromResume } from '@/utils/profileSync';
 
@@ -382,7 +382,7 @@ export default function ResumeParserPage() {
 
                   <div className="pt-2 border-t border-white/5 flex items-center justify-end">
                     <Button variant="ghost" size="sm" asChild className="h-7 text-xs gap-1 text-primary hover:text-primary">
-                      <a href={r.url} target="_blank" rel="noopener noreferrer">
+                      <a href={getAuthenticatedFileUrl(r.url)} target="_blank" rel="noopener noreferrer">
                         <Download className="w-3.5 h-3.5" />
                         <span>View / Download</span>
                       </a>

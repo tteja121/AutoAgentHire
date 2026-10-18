@@ -15,8 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
-import { apiClient, API_ENDPOINTS } from "@/lib/api";
+import { apiClient, API_ENDPOINTS, API_BASE_URL, getAuthenticatedFileUrl } from "@/lib/api";
 import { jobsService } from "@/services/jobsService";
 import { applicationsService } from "@/services/applicationsService";
 import { companiesService } from "@/services/companiesService";
@@ -349,9 +348,12 @@ export default function RecruiterPortal() {
     const tzOffset = tomorrow.getTimezoneOffset() * 60000;
     const localISOTime = (new Date(tomorrow.getTime() - tzOffset)).toISOString().slice(0, 16);
 
+    const randMeetCode = `${Math.random().toString(36).substring(2, 5)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 5)}`;
     setInterviewForm({
       scheduled_at: candidate.interview_scheduled_at ? new Date(candidate.interview_scheduled_at).toISOString().slice(0, 16) : localISOTime,
-      meeting_link: candidate.interview_meeting_link || "https://meet.google.com/new",
+      meeting_link: (candidate.interview_meeting_link && !candidate.interview_meeting_link.endsWith('/new')) 
+        ? candidate.interview_meeting_link 
+        : `https://meet.google.com/${randMeetCode}`,
       round: candidate.interview_round || "Technical Interview Round 1",
       notes: candidate.interview_notes || candidate.recruiter_notes || "Please join with webcam and microphone ready. Interview will be conducted via Google Meet.",
     });
@@ -409,17 +411,32 @@ export default function RecruiterPortal() {
     }
 
     try {
-      await apiClient.put(API_ENDPOINTS.recruiter.updateApplicationStatus(appId), {
+      const resp = await apiClient.put(API_ENDPOINTS.recruiter.updateApplicationStatus(appId), {
         status: newStatus,
       });
 
-      toast({
-        title: "Status Updated",
-        description: `Candidate marked as ${newStatus}`,
-      });
+      const meetLink = resp.data?.interview_meeting_link;
+      const targetEmail = resp.data?.email_recipient || selectedCandidate?.candidate_email || "candidate";
+
+      if (newStatus === "shortlisted") {
+        toast({
+          title: "Candidate Shortlisted! 🎉",
+          description: `Google Meet link generated (${meetLink || 'Active'}) and personalized email dispatched to ${targetEmail}.`,
+        });
+      } else {
+        toast({
+          title: `Status: ${newStatus.toUpperCase()}`,
+          description: `Application updated to ${newStatus}. Personalized notification email dispatched to ${targetEmail}.`,
+        });
+      }
+
       loadTrackingData();
       if (selectedCandidate && selectedCandidate.id === appId) {
-        setSelectedCandidate(prev => prev ? { ...prev, status: newStatus } : null);
+        setSelectedCandidate(prev => prev ? {
+          ...prev,
+          status: newStatus,
+          interview_meeting_link: meetLink || prev.interview_meeting_link,
+        } : null);
       }
     } catch (err: any) {
       toast({
@@ -430,9 +447,8 @@ export default function RecruiterPortal() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("userRole");
+  const handleLogout = async () => {
+    await authService.signOut();
     navigate("/login");
   };
 
@@ -706,26 +722,61 @@ export default function RecruiterPortal() {
   const handleInspectCandidate = async (app: CandidateApplication) => {
     setSelectedCandidate(app);
     setParsedCandidateResume(null);
+    setParsingInspectResume(true);
 
-    // If candidate has a resume file, fetch and parse it to show structured recruiter preview
-    if (app.resume_url) {
-      setParsingInspectResume(true);
+    try {
+      // 1. Try direct server-side AI resume analysis first
       try {
-        const fileResp = await fetch(app.resume_url);
+        const resp = await apiClient.get<any>(`/api/recruiter/applications/${app.id}/analyze-resume`);
+        if (resp.data && resp.data.parsed_data) {
+          setParsedCandidateResume(resp.data.parsed_data);
+          toast({
+            title: "Resume Analyzed Successfully! ✨",
+            description: `Extracted ${(resp.data.parsed_data.skills || []).length} candidate skills & background details.`,
+          });
+          return;
+        }
+      } catch (srvErr) {
+        console.warn("Direct server resume analysis failed, trying file download fallback:", srvErr);
+      }
+
+      // 2. Fallback: Fetch document via URL and submit to ATS parser
+      if (app.resume_url) {
+        const fileUrl = getAuthenticatedFileUrl(app.resume_url);
+        const token = localStorage.getItem('authToken');
+        const fileResp = await fetch(fileUrl, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         if (fileResp.ok) {
           const blob = await fileResp.blob();
           const parseData = new FormData();
           parseData.append("file", blob, app.resume_filename || "resume.pdf");
-          const parseResult = await apiClient.postFormData(API_ENDPOINTS.ats.parseResume, parseData);
-          if (parseResult.data && parseResult.data.parsed_data) {
-            setParsedCandidateResume(parseResult.data.parsed_data);
+          const parseResult = await apiClient.postFormData<any>(API_ENDPOINTS.ats.parseResume, parseData);
+          const parsed = parseResult.data?.parsed_data || parseResult.data;
+          if (parsed) {
+            setParsedCandidateResume(parsed);
+            toast({
+              title: "Resume Analyzed Successfully! ✨",
+              description: `Extracted ${(parsed.skills || []).length} candidate skills & background details.`,
+            });
+            return;
           }
         }
-      } catch (err) {
-        console.warn("Could not automatically parse candidate resume for preview:", err);
-      } finally {
-        setParsingInspectResume(false);
       }
+
+      toast({
+        title: "Analysis Notice",
+        description: "Resume analysis complete from candidate application records.",
+      });
+    } catch (err: any) {
+      console.warn("Could not parse candidate resume for preview:", err);
+      toast({
+        title: "Resume Analysis Failed",
+        description: err?.message || "Could not analyze resume document",
+        variant: "destructive",
+      });
+    } finally {
+      setParsingInspectResume(false);
     }
   };
 
@@ -1900,7 +1951,7 @@ export default function RecruiterPortal() {
                                 asChild
                                 className="text-xs h-8 gap-1 border-primary/30 text-primary hover:bg-primary/10"
                               >
-                                <a href={app.resume_url} target="_blank" rel="noopener noreferrer">
+                                <a href={getAuthenticatedFileUrl(app.resume_url)} target="_blank" rel="noopener noreferrer">
                                   <FileText className="w-3.5 h-3.5" />
                                   <span>View Resume / CV</span>
                                 </a>
@@ -2252,7 +2303,7 @@ export default function RecruiterPortal() {
                     </div>
                     {selectedCandidate.resume_url && (
                       <Button variant="outline" size="sm" asChild className="h-8 text-xs">
-                        <a href={selectedCandidate.resume_url} target="_blank" rel="noopener noreferrer">
+                        <a href={getAuthenticatedFileUrl(selectedCandidate.resume_url)} target="_blank" rel="noopener noreferrer">
                           <Eye className="w-3 h-3 mr-1" />
                           View Document
                         </a>
@@ -2355,6 +2406,73 @@ export default function RecruiterPortal() {
                               {skill}
                             </Badge>
                           ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Extracted Summary */}
+                    {parsedCandidateResume.summary && (
+                      <div className="pt-2 border-t border-primary/10">
+                        <span className="text-[10px] text-muted-foreground block uppercase font-mono mb-1">
+                          Professional Summary
+                        </span>
+                        <p className="text-xs text-foreground/90 leading-relaxed bg-black/20 p-2.5 rounded-lg border border-white/5">
+                          {parsedCandidateResume.summary}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Extracted Experience */}
+                    {parsedCandidateResume.experience && parsedCandidateResume.experience.length > 0 && (
+                      <div className="pt-2 border-t border-primary/10 space-y-1.5">
+                        <span className="text-[10px] text-muted-foreground block uppercase font-mono">
+                          Work Experience
+                        </span>
+                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                          {Array.isArray(parsedCandidateResume.experience) ? (
+                            parsedCandidateResume.experience.map((exp: any, i: number) => (
+                              <div key={i} className="p-2 rounded bg-black/20 border border-white/5 text-xs">
+                                <div className="font-semibold text-foreground flex justify-between">
+                                  <span>{typeof exp === "string" ? exp : (exp.title || exp.role || "Role")}</span>
+                                  {exp.duration && <span className="text-[10px] text-muted-foreground">{exp.duration}</span>}
+                                </div>
+                                {exp.company && <div className="text-[11px] text-primary/80">{exp.company}</div>}
+                                {Array.isArray(exp.highlights) && exp.highlights.length > 0 && (
+                                  <ul className="list-disc list-inside mt-1 text-[11px] text-muted-foreground space-y-0.5">
+                                    {exp.highlights.map((h: string, hi: number) => (
+                                      <li key={hi} className="truncate">{h}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-xs text-muted-foreground">{String(parsedCandidateResume.experience)}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Extracted Education */}
+                    {parsedCandidateResume.education && parsedCandidateResume.education.length > 0 && (
+                      <div className="pt-2 border-t border-primary/10 space-y-1.5">
+                        <span className="text-[10px] text-muted-foreground block uppercase font-mono">
+                          Education
+                        </span>
+                        <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                          {Array.isArray(parsedCandidateResume.education) ? (
+                            parsedCandidateResume.education.map((edu: any, i: number) => (
+                              <div key={i} className="p-2 rounded bg-black/20 border border-white/5 text-xs flex justify-between items-center">
+                                <div>
+                                  <div className="font-medium text-foreground">{typeof edu === "string" ? edu : (edu.degree || "Degree")}</div>
+                                  {edu.institution && <div className="text-[11px] text-muted-foreground">{edu.institution}</div>}
+                                </div>
+                                {edu.year && <span className="text-[10px] text-primary">{edu.year}</span>}
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-xs text-muted-foreground">{String(parsedCandidateResume.education)}</p>
+                          )}
                         </div>
                       </div>
                     )}

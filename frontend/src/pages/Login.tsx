@@ -128,7 +128,7 @@ const Login = () => {
 
     try {
       const result = await authService.signIn(cleanId, password);
-      const effectiveRole = result?.user?.user_metadata?.role || localStorage.getItem("userRole") || "candidate";
+      const effectiveRole = result?.role || result?.user?.user_metadata?.role || localStorage.getItem("userRole") || "candidate";
 
       // Smart role redirection to appropriate portal
       if (effectiveRole === "authorizer") {

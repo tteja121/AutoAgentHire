@@ -6,7 +6,7 @@ Provides health checks, collection inspect endpoints, and synchronization trigge
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Depends
 from backend.database.mongo import mongo_manager
-from backend.auth.dependencies import get_current_user_optional
+from backend.auth.dependencies import get_current_user
 from backend.database.models_complete import User
 
 router = APIRouter(prefix="/api/mongo", tags=["MongoDB"])
@@ -44,15 +44,19 @@ def get_mongo_status():
 
 
 @router.post("/sync")
-def trigger_mongo_sync():
+def trigger_mongo_sync(current_user: User = Depends(get_current_user)):
     """Trigger manual or automated synchronization of SQLite records into MongoDB Atlas."""
+    if current_user.role != "authorizer":
+        raise HTTPException(status_code=403, detail="Authorizer permission required")
     res = mongo_manager.sync_from_sqlite()
     return res
 
 
 @router.get("/collections")
-def list_mongo_collections():
+def list_mongo_collections(current_user: User = Depends(get_current_user)):
     """List all available collections in MongoDB Atlas."""
+    if current_user.role != "authorizer":
+        raise HTTPException(status_code=403, detail="Authorizer permission required")
     try:
         return {
             "database": mongo_manager.db_name,
@@ -72,11 +76,23 @@ def get_mongo_jobs(limit: int = 50):
 
 
 @router.get("/applications")
-def get_mongo_applications(candidate_email: Optional[str] = None, limit: int = 50):
-    """Retrieve candidate applications stored directly in MongoDB Atlas."""
+def get_mongo_applications(
+    candidate_email: Optional[str] = None,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve candidate applications stored directly in MongoDB Atlas with data isolation."""
+    import re
     filter_q = {}
-    if candidate_email:
-        filter_q["candidate_email"] = candidate_email.strip()
+    if current_user.role == "candidate":
+        filter_q["candidate_email"] = {"$regex": f"^{re.escape(current_user.email.strip())}$", "$options": "i"}
+    elif current_user.role == "authorizer":
+        if candidate_email:
+            filter_q["candidate_email"] = {"$regex": f"^{re.escape(candidate_email.strip())}$", "$options": "i"}
+    else:
+        # Recruiters or other roles must not read all applications arbitrary
+        raise HTTPException(status_code=403, detail="Not authorized to access general applications collection")
+
     return {
         "applications": mongo_manager.get_applications(filter_query=filter_q, limit=limit),
         "source": "MongoDB Atlas"
@@ -84,10 +100,15 @@ def get_mongo_applications(candidate_email: Optional[str] = None, limit: int = 5
 
 
 @router.get("/users")
-def get_mongo_users(limit: int = 50):
-    """Retrieve user accounts stored in MongoDB Atlas."""
+def get_mongo_users(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve user accounts stored in MongoDB Atlas (authorizer-only)."""
+    if current_user.role != "authorizer":
+        raise HTTPException(status_code=403, detail="Authorizer permission required")
+
     users = mongo_manager.get_users()
-    # Mask hashed password for security
     sanitized = []
     for u in users[:limit]:
         u_copy = dict(u)

@@ -13,7 +13,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+from backend.auth.dependencies import get_current_user
+from backend.database.models_complete import User
 
 # Heavy bot import is deferred to first request to avoid slowing server startup
 AutoAgentHireBot = None
@@ -841,18 +843,31 @@ async def get_automation_results_v2(session_id: str):
 
 
 @router.get("/applications")
-async def get_all_applications():
-    """V2: Get all application records from PostgreSQL."""
+async def get_all_applications(current_user: User = Depends(get_current_user)):
+    """V2: Get application records from database filtered by authenticated user."""
     if not DB_AVAILABLE:
         return {"applications": [], "message": "Database not available"}
     assert engine is not None and sql_text is not None
     try:
         _ensure_v2_tables()
         with engine.connect() as conn:
-            rows = conn.execute(sql_text(
-                "SELECT id, session_id, job_title, company_name, job_url, status, match_score, applied_at "
-                "FROM v2_applications ORDER BY applied_at DESC LIMIT 200"
-            )).fetchall()
+            if current_user.role == "authorizer":
+                query = sql_text(
+                    "SELECT id, session_id, job_title, company_name, job_url, status, match_score, applied_at "
+                    "FROM v2_applications ORDER BY applied_at DESC LIMIT 200"
+                )
+                rows = conn.execute(query).fetchall()
+            elif current_user.role == "candidate":
+                query = sql_text(
+                    "SELECT a.id, a.session_id, a.job_title, a.company_name, a.job_url, a.status, a.match_score, a.applied_at "
+                    "FROM v2_applications a "
+                    "JOIN v2_user_profiles p ON a.session_id = p.session_id "
+                    "WHERE LOWER(p.email) = LOWER(:email) "
+                    "ORDER BY a.applied_at DESC LIMIT 200"
+                )
+                rows = conn.execute(query, {"email": current_user.email}).fetchall()
+            else:
+                return {"applications": []}
         return {
             "applications": [
                 {
@@ -873,19 +888,33 @@ async def get_all_applications():
 
 
 @router.get("/agent-runs")
-async def get_all_agent_runs():
-    """V2: Get all agent run records from PostgreSQL."""
+async def get_all_agent_runs(current_user: User = Depends(get_current_user)):
+    """V2: Get agent run records from database filtered by authenticated user."""
     if not DB_AVAILABLE:
         return {"runs": [], "message": "Database not available"}
     assert engine is not None and sql_text is not None
     try:
         _ensure_v2_tables()
         with engine.connect() as conn:
-            rows = conn.execute(sql_text(
-                "SELECT id, session_id, status, keyword, location, max_applications, dry_run, "
-                "jobs_found, applications_submitted, applications_failed, started_at, completed_at "
-                "FROM v2_agent_runs ORDER BY started_at DESC LIMIT 50"
-            )).fetchall()
+            if current_user.role == "authorizer":
+                query = sql_text(
+                    "SELECT id, session_id, status, keyword, location, max_applications, dry_run, "
+                    "jobs_found, applications_submitted, applications_failed, started_at, completed_at "
+                    "FROM v2_agent_runs ORDER BY started_at DESC LIMIT 50"
+                )
+                rows = conn.execute(query).fetchall()
+            elif current_user.role == "candidate":
+                query = sql_text(
+                    "SELECT r.id, r.session_id, r.status, r.keyword, r.location, r.max_applications, r.dry_run, "
+                    "r.jobs_found, r.applications_submitted, r.applications_failed, r.started_at, r.completed_at "
+                    "FROM v2_agent_runs r "
+                    "JOIN v2_user_profiles p ON r.session_id = p.session_id "
+                    "WHERE LOWER(p.email) = LOWER(:email) "
+                    "ORDER BY r.started_at DESC LIMIT 50"
+                )
+                rows = conn.execute(query, {"email": current_user.email}).fetchall()
+            else:
+                return {"runs": []}
         return {
             "runs": [
                 {

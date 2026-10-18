@@ -21,6 +21,25 @@ const getApiBaseUrl = (): string => {
 
 export const API_BASE_URL = getApiBaseUrl();
 
+/**
+ * Generate authenticated URL for viewing/downloading resumes or documents.
+ * Appends the current JWT session token as a query parameter so browser
+ * window navigation (<a target="_blank"> or window.open) authenticates properly.
+ */
+export function getAuthenticatedFileUrl(rawUrl?: string): string {
+  if (!rawUrl) return '';
+  const token = localStorage.getItem('authToken');
+  let fullUrl = rawUrl;
+  if (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')) {
+    const cleanPath = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
+    fullUrl = `${API_BASE_URL}${cleanPath}`;
+  }
+  if (token && !fullUrl.includes('token=')) {
+    fullUrl = `${fullUrl}${fullUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+  }
+  return fullUrl;
+}
+
 // ─── TypeScript Interfaces ────────────────────────────────────────────────────
 
 export interface Job {
@@ -118,8 +137,16 @@ apiClient._axios.interceptors.response.use(
       );
       
       if (!isAuthEndpoint && !isAuthPage) {
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('userRole');
+        const keysToRemove = [
+          'authToken', 'userRole', 'candidate_email', 'candidate_name',
+          'candidate_phone', 'candidate_location', 'candidate_headline',
+          'candidate_avatar_url', 'candidate_experience', 'candidate_summary',
+          'candidate_skills', 'candidate_skills_str', 'candidate_resume_name',
+          'candidate_profile', 'client_applied_applications', 'userProfile',
+          'resumeData', 'resumePath', 'jobSearchConfig',
+        ];
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+        try { sessionStorage.clear(); } catch (_) {}
         window.location.href = '/login';
       }
     }

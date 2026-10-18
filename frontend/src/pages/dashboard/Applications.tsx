@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { applicationService } from "@/services/applicationService";
+import { getAuthenticatedFileUrl } from "@/lib/api";
 import {
   Table,
   TableBody,
@@ -136,18 +137,27 @@ const Applications = () => {
       }
     }
 
-    // Real-time synchronization when an application is submitted from any container
+    // Real-time synchronization when an application is submitted or user logs out
     const handleApplicationSync = () => {
       fetchApplications();
       fetchActivities();
     };
 
+    const handleLogout = () => {
+      setApplications([]);
+      setActivities([]);
+      setResumeAnalysis(null);
+      setAppliedJobIds([]);
+    };
+
     window.addEventListener('applicationSubmitted', handleApplicationSync);
     window.addEventListener('candidateProfileUpdated', handleApplicationSync);
+    window.addEventListener('authLogout', handleLogout);
 
     return () => {
       window.removeEventListener('applicationSubmitted', handleApplicationSync);
       window.removeEventListener('candidateProfileUpdated', handleApplicationSync);
+      window.removeEventListener('authLogout', handleLogout);
     };
   }, [location.state]);
 
@@ -244,8 +254,10 @@ const Applications = () => {
     : applications.filter(app => {
         const s = (app.status || "").toLowerCase();
         if (filterStatus === "applied") return s === "applied" || s === "submitted";
-        if (filterStatus === "interviewing") return s === "interview" || s === "interviewing" || !!app.interview_meeting_link || !!app.interview_scheduled_at;
-        if (filterStatus === "pending") return s === "pending" || s === "reviewing";
+        if (filterStatus === "interviewing") return s === "interview" || s === "interviewing" || s === "shortlisted" || !!app.interview_meeting_link || !!app.interview_scheduled_at;
+        if (filterStatus === "shortlisted") return s === "shortlisted";
+        if (filterStatus === "pending") return s === "pending" || s === "reviewing" || s === "under_review";
+        if (filterStatus === "rejected") return s === "rejected";
         return s === filterStatus;
       });
 
@@ -281,7 +293,7 @@ const Applications = () => {
   };
 
   const scheduledInterviews = applications.filter(
-    app => app.interview_meeting_link || app.interview_scheduled_at || app.status === "interview" || app.status === "interviewing"
+    app => app.interview_meeting_link || app.interview_scheduled_at || app.status === "interview" || app.status === "interviewing" || app.status === "shortlisted"
   );
 
   const getStatusBadge = (status: string) => {
@@ -406,6 +418,13 @@ const Applications = () => {
                   onClick={() => setFilterStatus("interviewing")}
                 >
                   Interviewing
+                </Button>
+                <Button
+                  variant={filterStatus === "shortlisted" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setFilterStatus("shortlisted")}
+                >
+                  Shortlisted
                 </Button>
                 <Button
                   variant={filterStatus === "pending" ? "default" : "outline"}
@@ -849,7 +868,7 @@ const Applications = () => {
                                 title="View submitted resume"
                               >
                                 <a 
-                                  href={app.resume_url} 
+                                  href={getAuthenticatedFileUrl(app.resume_url)} 
                                   target="_blank" 
                                   rel="noopener noreferrer"
                                 >

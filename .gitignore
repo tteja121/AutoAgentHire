@@ -38,6 +38,7 @@ venv.bak/
 
 # ── IDEs, Editors & OS Files ─────────────────────────────────────────────────
 .vscode/
+.agents/
 .idea/
 *.swp
 *.swo

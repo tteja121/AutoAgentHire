@@ -19,6 +19,8 @@ from backend.database.connection import get_db
 from backend.database import crud
 from backend.agents.graph_state import AgentInput, AgentOutput
 from backend.config import settings
+from backend.auth.dependencies import get_current_user
+from backend.database.models_complete import User
 import os
 
 # Heavy ML/agent imports deferred to avoid slow server startup
@@ -190,6 +192,7 @@ async def run_agent_workflow_background(
 async def run_agent(
     request: RunAgentRequest,
     background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -209,11 +212,9 @@ async def run_agent(
         if not Path(request.resume_file_path).exists():
             raise HTTPException(status_code=404, detail=f"Resume file not found: {request.resume_file_path}")
         
-        # Get or create user
-        user_email = request.linkedin_email or os.getenv("LINKEDIN_EMAIL", "") or os.getenv("LINKEDIN_EMAIL", "default@example.com")
-        user = crud.get_user_by_email(db, user_email)
-        if not user:
-            user = crud.create_user(db, email=user_email, linkedin_email=user_email)
+        # Use authenticated user — never trust request body for identity
+        user = current_user
+        user_email = current_user.email
         
         # Create agent run record
         crud.create_agent_run(db, {
@@ -276,7 +277,11 @@ async def run_agent(
 
 
 @router.get("/status/{run_id}", response_model=AgentStatusResponse)
-async def get_agent_status(run_id: str, db: Session = Depends(get_db)):
+async def get_agent_status(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """
     Get real-time status of agent workflow.
     Frontend should poll this endpoint every 5 seconds.
@@ -284,12 +289,19 @@ async def get_agent_status(run_id: str, db: Session = Depends(get_db)):
     # Check if orchestrator is active (in-memory)
     if run_id in active_orchestrators:
         orchestrator = active_orchestrators[run_id]
+        # Verify ownership via DB record before returning in-memory status
+        agent_run = crud.get_agent_run(db, run_id)
+        if agent_run and str(agent_run.user_id) != str(current_user.id):
+            raise HTTPException(status_code=404, detail=f"Agent run not found: {run_id}")
         status = orchestrator.get_status()
         return AgentStatusResponse(**status)
     
     # Otherwise, check database
     agent_run = crud.get_agent_run(db, run_id)
     if not agent_run:
+        raise HTTPException(status_code=404, detail=f"Agent run not found: {run_id}")
+    
+    if str(agent_run.user_id) != str(current_user.id):
         raise HTTPException(status_code=404, detail=f"Agent run not found: {run_id}")
     
     return AgentStatusResponse(
@@ -311,10 +323,17 @@ async def get_agent_status(run_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/results/{run_id}")
-async def get_agent_results(run_id: str, db: Session = Depends(get_db)):
+async def get_agent_results(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Get final results for a completed workflow"""
     agent_run = crud.get_agent_run(db, run_id)
     if not agent_run:
+        raise HTTPException(status_code=404, detail=f"Agent run not found: {run_id}")
+    
+    if str(agent_run.user_id) != str(current_user.id):
         raise HTTPException(status_code=404, detail=f"Agent run not found: {run_id}")
     
     if agent_run.status not in ['completed', 'failed']:
@@ -350,7 +369,7 @@ async def get_agent_results(run_id: str, db: Session = Depends(get_db)):
 @router.post("/resume/upload", response_model=UploadResumeResponse)
 async def upload_resume(
     file: UploadFile = File(...),
-    user_id: str = "default_user",
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -391,10 +410,8 @@ async def upload_resume(
             resume_intelligence = _ResumeIntelligence()
             resume_data = resume_intelligence.parse_resume_file(str(file_path))
             
-            # Get or create user
-            user = crud.get_user_by_email(db, user_id)
-            if not user:
-                user = crud.create_user(db, email=user_id)
+            # Use authenticated user — never trust request params for identity
+            user = current_user
             
             # Save to database
             resume_dict = {
@@ -462,16 +479,12 @@ async def get_applications(
 
 @router.get("/runs")
 async def get_agent_runs(
-    user_id: str = "default_user",
     limit: int = 20,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get agent run history for a user"""
-    user = crud.get_user_by_email(db, user_id)
-    if not user:
-        return {'runs': [], 'total': 0}
-    
-    runs = crud.get_user_agent_runs(db, user.id, limit=limit)
+    """Get agent run history for the authenticated user"""
+    runs = crud.get_user_agent_runs(db, current_user.id, limit=limit)
     
     return {
         'runs': [
@@ -493,12 +506,12 @@ async def get_agent_runs(
 
 
 @router.get("/stats")
-async def get_user_stats(user_id: str = "default_user", db: Session = Depends(get_db)):
-    """Get user statistics"""
+async def get_user_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get user statistics for the authenticated user"""
     # TODO: Implement proper user stats when user management is complete
     # For now, return mock stats to prevent 500 errors
     return {
-        "user_id": user_id,
+        "user_id": str(current_user.id),
         "total_applications": 0,
         "active_searches": 0,
         "interviews_scheduled": 0,
