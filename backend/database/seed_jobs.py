@@ -348,14 +348,18 @@ JOBS_DATA = [
 ]
 
 
-def seed_jobs():
+def seed_jobs(force: bool = False):
     """Seed the job postings if they don't already exist."""
-    print("=" * 60)
-    print("[SEED] Seeding Job Postings into Recruiter Portal & Candidate Board...")
-    print("=" * 60)
-
     db = SessionLocal()
     try:
+        existing_count = db.query(JobPosting).count()
+        if existing_count >= len(JOBS_DATA) and not force:
+            return 0  # Jobs are already seeded; skip redundant processing and logging
+
+        print("=" * 60)
+        print("[SEED] Seeding Job Postings into Recruiter Portal & Candidate Board...")
+        print("=" * 60)
+
         # Find recruiter account (default to Re@auto.in or first available recruiter)
         recruiter = db.query(User).filter(User.email.ilike("re@auto.in")).first()
         if not recruiter:

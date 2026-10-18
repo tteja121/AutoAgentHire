@@ -50,13 +50,13 @@ try:
     )
     QDRANT_AVAILABLE = True
 except ImportError:
-    print("[QD] WARNING - qdrant-client not installed. Run: pip install qdrant-client")
+    pass
 
 try:
     from sentence_transformers import SentenceTransformer  # type: ignore[assignment]
     ST_AVAILABLE = True
 except Exception:
-    print("[QD] WARNING - sentence-transformers not available. Embeddings disabled.")
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +94,6 @@ class QdrantVectorStore:
             return
 
         if not QDRANT_URL or not QDRANT_API_KEY:
-            print("[QD] WARNING - QDRANT_URL / QDRANT_API_KEY not set in .env — store disabled.")
             return
 
         try:

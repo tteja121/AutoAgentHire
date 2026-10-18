@@ -16,19 +16,22 @@ SentenceTransformer: Any = None
 FAISS_AVAILABLE = False
 SENTENCE_TRANSFORMERS_AVAILABLE = False
 
+import logging
+logger = logging.getLogger(__name__)
+
 try:
     import faiss as _faiss  # type: ignore
     faiss = _faiss
     FAISS_AVAILABLE = True
 except ImportError:
-    print("[VS] WARNING - FAISS not installed. Using fallback similarity search.")
+    logger.debug("[VS] FAISS not installed. Using fallback similarity search.")
 
 try:
     from sentence_transformers import SentenceTransformer as _SentenceTransformer  # type: ignore
     SentenceTransformer = _SentenceTransformer
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except Exception:
-    print("[VS] WARNING - sentence-transformers/torch not available. Using fallback embedding.")
+    logger.debug("[VS] sentence-transformers/torch not available. Using fallback embedding.")
 
 
 class VectorStoreManager:
