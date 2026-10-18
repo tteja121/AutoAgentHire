@@ -8,10 +8,22 @@ import time
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
-from pymongo import MongoClient, ASCENDING, DESCENDING, TEXT
-from pymongo.database import Database
-from pymongo.collection import Collection
-from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+try:
+    from pymongo import MongoClient, ASCENDING, DESCENDING, TEXT
+    from pymongo.database import Database
+    from pymongo.collection import Collection
+    from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+    PYMONGO_AVAILABLE = True
+except ImportError:
+    MongoClient = None  # type: ignore[assignment, misc]
+    Database = None  # type: ignore[assignment, misc]
+    Collection = None  # type: ignore[assignment, misc]
+    ASCENDING = 1
+    DESCENDING = -1
+    TEXT = "text"
+    ConnectionFailure = Exception  # type: ignore[assignment, misc]
+    ServerSelectionTimeoutError = Exception  # type: ignore[assignment, misc]
+    PYMONGO_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +48,12 @@ class MongoDBManager:
 
     def connect(self) -> bool:
         """Initialize connection pool to MongoDB Atlas with circuit-breaker protection."""
+        if not PYMONGO_AVAILABLE:
+            if not self._failure_logged:
+                logger.info("[MongoDB] pymongo driver not installed — operating on primary SQLite database.")
+                self._failure_logged = True
+            return False
+
         if self._connected and self._client and self._db is not None:
             return True
 
@@ -44,6 +62,7 @@ class MongoDBManager:
                 logger.info("[MongoDB] MONGODB_URI not configured — document store disabled (using primary SQLite database).")
                 self._failure_logged = True
             return False
+
 
         now = time.time()
         # Cooldown guard: avoid repeating blocking TLS/handshake attempts during requests
