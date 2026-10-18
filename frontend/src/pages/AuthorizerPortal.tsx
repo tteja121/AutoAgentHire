@@ -1974,7 +1974,7 @@ export default function AuthorizerPortal() {
 
       {/* Inspect and Authorize Job Modal */}
       <Dialog open={!!selectedJob} onOpenChange={() => setSelectedJob(null)}>
-        <DialogContent className="max-w-2xl bg-card border-white/10 text-foreground">
+        <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto bg-card/95 backdrop-blur-2xl border-white/10 text-foreground shadow-2xl p-6">
           {selectedJob && (
             <div className="space-y-6">
               <DialogHeader>

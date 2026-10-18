@@ -2279,7 +2279,7 @@ export default function RecruiterPortal() {
 
       {/* Candidate Details & Resume Modal */}
       <Dialog open={!!selectedCandidate} onOpenChange={() => setSelectedCandidate(null)}>
-        <DialogContent className="max-w-2xl bg-card border-white/10 text-foreground">
+        <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto bg-card/95 backdrop-blur-2xl border-white/10 text-foreground shadow-2xl p-6">
           {selectedCandidate && (
             <div className="space-y-6">
               <DialogHeader>

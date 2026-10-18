@@ -273,20 +273,6 @@ export const DashboardLayout = () => {
           })}
         </nav>
 
-        {/* User Card on Bottom of Sidebar */}
-        {sidebarOpen && currentUser && (
-          <div className="p-3 mx-3 mb-2 rounded-xl bg-white/5 border border-white/5 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-blue-500 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
-              {getUserInitials()}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold truncate text-foreground">
-                {currentUser.full_name || currentUser.email?.split("@")[0] || "Candidate"}
-              </p>
-              <p className="text-[10px] text-muted-foreground truncate">{currentUser.email || "Candidate Active"}</p>
-            </div>
-          </div>
-        )}
 
         {/* Logout */}
         <div className="p-4 border-t border-white/5">

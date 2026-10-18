@@ -25,7 +25,7 @@ export const Footer = () => {
           <div>
             <h4 className="font-semibold mb-4 text-foreground">Product</h4>
             <ul className="space-y-3 text-sm">
-              {["Features", "Pricing", "Integrations", "API"].map((item) => (
+              {["Features", "How It Works", "Browse Jobs", "Recruiter Portal"].map((item) => (
                 <li key={item}>
                   <Link to="/" className="text-muted-foreground hover:text-primary transition-colors">
                     {item}

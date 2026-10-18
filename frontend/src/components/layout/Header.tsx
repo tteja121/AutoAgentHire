@@ -11,7 +11,6 @@ const navLinks = [
   { name: "Recruiter Registration", href: "/recruiter/register" },
   { name: "Features", href: "/#features" },
   { name: "How It Works", href: "/#how-it-works" },
-  { name: "Pricing", href: "/#pricing" },
 ];
 
 export const Header = () => {

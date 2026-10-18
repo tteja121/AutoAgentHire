@@ -501,7 +501,7 @@ export default function CandidateJobsPage() {
 
       {/* Candidate Direct Application Dialog */}
       <Dialog open={isApplying} onOpenChange={setIsApplying}>
-        <DialogContent className="max-w-xl bg-card border-white/10 text-foreground">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto bg-card border-white/10 text-foreground p-6 shadow-2xl">
           {selectedJob && (
             <form onSubmit={handleApplySubmit} className="space-y-5">
               <DialogHeader>
