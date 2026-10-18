@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { 
-  Bot, Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft, Briefcase, 
+import {
+  Bot, Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft, Briefcase,
   ShieldCheck, Clock, AlertTriangle, User, KeyRound,
   CheckCircle2, Sparkles
 } from "lucide-react";
@@ -248,11 +248,10 @@ const Login = () => {
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`p-3.5 rounded-xl text-xs flex items-start gap-2.5 ${
-                error.toLowerCase().includes("pending") || error.toLowerCase().includes("authorizer")
-                  ? "bg-amber-500/10 border border-amber-500/20 text-amber-300"
-                  : "bg-destructive/10 border border-destructive/20 text-destructive"
-              }`}
+              className={`p-3.5 rounded-xl text-xs flex items-start gap-2.5 ${error.toLowerCase().includes("pending") || error.toLowerCase().includes("authorizer")
+                ? "bg-amber-500/10 border border-amber-500/20 text-amber-300"
+                : "bg-destructive/10 border border-destructive/20 text-destructive"
+                }`}
             >
               {error.toLowerCase().includes("pending") ? (
                 <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -270,13 +269,13 @@ const Login = () => {
               <label className="block text-xs font-semibold mb-1.5 text-foreground flex items-center justify-between">
                 <span>Email / User ID</span>
                 <span className="text-[11px] font-normal text-muted-foreground">
-                  Email or assigned User ID
+                  Email/User ID
                 </span>
               </label>
 
               <Input
                 type="text"
-                placeholder="Enter your email or User ID (e.g. REC-1001, AUTH-001)"
+                placeholder="Enter your email/User ID"
                 icon={<Mail className="w-4 h-4 text-primary" />}
                 value={identifier}
                 onChange={(e) => {

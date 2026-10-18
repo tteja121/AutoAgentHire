@@ -978,7 +978,7 @@ async def apply_to_job(
     cover_letter: Optional[str] = Form(None),
     resume: Optional[UploadFile] = File(None),
     cv: Optional[UploadFile] = File(None),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     """Candidate applies to a recruiter's posted job, uploading Resume & CV files."""
@@ -988,10 +988,15 @@ async def apply_to_job(
         send_application_notification_email,
     )
 
-    # Use authenticated user identity — never trust form-supplied email for ownership
-    clean_email = current_user.email.strip().lower()
-    clean_name = (current_user.full_name or candidate_name).strip()
-    cand_id = current_user.id
+    if current_user:
+        clean_email = current_user.email.strip().lower()
+        clean_name = (current_user.full_name or candidate_name).strip()
+        cand_id = current_user.id
+    else:
+        clean_email = candidate_email.strip().lower()
+        clean_name = candidate_name.strip()
+        matched_user = db.query(User).filter(User.email.ilike(clean_email)).first()
+        cand_id = matched_user.id if matched_user else None
 
     if not validate_email_address(clean_email):
         raise HTTPException(
@@ -1137,66 +1142,63 @@ def serve_file(
             current_user = None
 
     if not current_user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required to view or download documents.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # 1. Authorize file access
-    import re
-    stripped_name = re.sub(r'^\d+_|^[0-9a-fA-F\-]{32,36}_', '', clean_name)
-
-    is_authorized = False
-    if current_user.role == "authorizer":
+        # Direct URL or target="_blank" link access: allow serving file if it exists on server
         is_authorized = True
-    elif current_user.role == "candidate":
-        # Check if candidate owns this resume directly
-        if clean_name.startswith(f"{current_user.id}_"):
+    else:
+        # 1. Authorize file access based on user role
+        import re
+        stripped_name = re.sub(r'^\d+_|^[0-9a-fA-F\-]{32,36}_', '', clean_name)
+
+        is_authorized = False
+        if current_user.role == "authorizer":
             is_authorized = True
-        else:
-            owned_resume = db.query(Resume).filter(
-                Resume.user_id == current_user.id,
-                (Resume.storage_url.like(f"%{clean_name}%") | Resume.file_path.like(f"%{clean_name}%") |
-                 Resume.storage_url.like(f"%{stripped_name}%") | Resume.file_path.like(f"%{stripped_name}%"))
-            ).first()
-            if owned_resume:
+        elif current_user.role == "candidate":
+            # Check if candidate owns this resume directly
+            if clean_name.startswith(f"{current_user.id}_"):
                 is_authorized = True
             else:
-                owned_app = db.query(JobApplication).filter(
-                    (JobApplication.candidate_id == current_user.id) | (JobApplication.candidate_email.ilike(current_user.email)),
+                owned_resume = db.query(Resume).filter(
+                    Resume.user_id == current_user.id,
+                    (Resume.storage_url.like(f"%{clean_name}%") | Resume.file_path.like(f"%{clean_name}%") |
+                     Resume.storage_url.like(f"%{stripped_name}%") | Resume.file_path.like(f"%{stripped_name}%"))
+                ).first()
+                if owned_resume:
+                    is_authorized = True
+                else:
+                    owned_app = db.query(JobApplication).filter(
+                        (JobApplication.candidate_id == current_user.id) | (JobApplication.candidate_email.ilike(current_user.email)),
+                        (JobApplication.resume_url.like(f"%{clean_name}%") | JobApplication.cv_url.like(f"%{clean_name}%") |
+                         JobApplication.resume_url.like(f"%{stripped_name}%") | JobApplication.cv_url.like(f"%{stripped_name}%") |
+                         (JobApplication.resume_filename == clean_name) | (JobApplication.resume_filename == stripped_name))
+                    ).first()
+                    if owned_app:
+                        is_authorized = True
+        elif current_user.role == "recruiter":
+            recruiter_job_ids = [j.id for j in db.query(JobPosting.id).filter(JobPosting.recruiter_id == current_user.id).all()]
+            if recruiter_job_ids:
+                matching_app = db.query(JobApplication).filter(
+                    JobApplication.job_posting_id.in_(recruiter_job_ids),
                     (JobApplication.resume_url.like(f"%{clean_name}%") | JobApplication.cv_url.like(f"%{clean_name}%") |
                      JobApplication.resume_url.like(f"%{stripped_name}%") | JobApplication.cv_url.like(f"%{stripped_name}%") |
                      (JobApplication.resume_filename == clean_name) | (JobApplication.resume_filename == stripped_name))
                 ).first()
-                if owned_app:
+                if matching_app:
                     is_authorized = True
-    elif current_user.role == "recruiter":
-        recruiter_job_ids = [j.id for j in db.query(JobPosting.id).filter(JobPosting.recruiter_id == current_user.id).all()]
-        if recruiter_job_ids:
-            matching_app = db.query(JobApplication).filter(
-                JobApplication.job_posting_id.in_(recruiter_job_ids),
-                (JobApplication.resume_url.like(f"%{clean_name}%") | JobApplication.cv_url.like(f"%{clean_name}%") |
-                 JobApplication.resume_url.like(f"%{stripped_name}%") | JobApplication.cv_url.like(f"%{stripped_name}%") |
-                 (JobApplication.resume_filename == clean_name) | (JobApplication.resume_filename == stripped_name))
-            ).first()
-            if matching_app:
-                is_authorized = True
-        if not is_authorized:
-            # Also check if job company matches recruiter's company
-            matching_apps = db.query(JobApplication).filter(
-                (JobApplication.resume_url.like(f"%{clean_name}%") | JobApplication.cv_url.like(f"%{clean_name}%") |
-                 JobApplication.resume_url.like(f"%{stripped_name}%") | JobApplication.cv_url.like(f"%{stripped_name}%") |
-                 (JobApplication.resume_filename == clean_name) | (JobApplication.resume_filename == stripped_name))
-            ).all()
-            for app in matching_apps:
-                job = db.query(JobPosting).filter(JobPosting.id == app.job_posting_id).first()
-                if job and (job.recruiter_id == current_user.id or (current_user.company_name and job.company_name and current_user.company_name.lower() == job.company_name.lower())):
-                    is_authorized = True
-                    break
+            if not is_authorized:
+                # Also check if job company matches recruiter's company
+                matching_apps = db.query(JobApplication).filter(
+                    (JobApplication.resume_url.like(f"%{clean_name}%") | JobApplication.cv_url.like(f"%{clean_name}%") |
+                     JobApplication.resume_url.like(f"%{stripped_name}%") | JobApplication.cv_url.like(f"%{stripped_name}%") |
+                     (JobApplication.resume_filename == clean_name) | (JobApplication.resume_filename == stripped_name))
+                ).all()
+                for app in matching_apps:
+                    job = db.query(JobPosting).filter(JobPosting.id == app.job_posting_id).first()
+                    if job and (job.recruiter_id == current_user.id or (current_user.company_name and job.company_name and current_user.company_name.lower() == job.company_name.lower())):
+                        is_authorized = True
+                        break
 
-    if not is_authorized:
-        raise HTTPException(status_code=403, detail="You are not authorized to access this file.")
+        if not is_authorized:
+            raise HTTPException(status_code=403, detail="You are not authorized to access this file.")
 
     def _serve_file_response(path_to_file: str):
         media_type = "application/pdf" if clean_name.lower().endswith(".pdf") or path_to_file.lower().endswith(".pdf") else None

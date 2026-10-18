@@ -566,7 +566,7 @@ async def apply_all_jobs(
 async def parse_resume(
     file: UploadFile = File(...),
     job_description: Optional[str] = Form(None),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     """

@@ -1992,14 +1992,14 @@ export default function RecruiterPortal() {
 
                           {/* Quick action buttons for Recruiter */}
                           <div className="flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                            {app.resume_url && (
+                            {(app.resume_url || app.cv_url) && (
                               <Button
                                 variant="outline"
                                 size="sm"
                                 asChild
                                 className="text-xs h-8 gap-1 border-primary/30 text-primary hover:bg-primary/10"
                               >
-                                <a href={getAuthenticatedFileUrl(app.resume_url)} target="_blank" rel="noopener noreferrer">
+                                <a href={getAuthenticatedFileUrl(app.resume_url || app.cv_url)} target="_blank" rel="noopener noreferrer">
                                   <FileText className="w-3.5 h-3.5" />
                                   <span>View Resume / CV</span>
                                 </a>
@@ -2349,9 +2349,9 @@ export default function RecruiterPortal() {
                         <span className="text-[10px] text-muted-foreground">Candidate Resume</span>
                       </div>
                     </div>
-                    {selectedCandidate.resume_url && (
+                    {(selectedCandidate.resume_url || selectedCandidate.cv_url) && (
                       <Button variant="outline" size="sm" asChild className="h-8 text-xs">
-                        <a href={getAuthenticatedFileUrl(selectedCandidate.resume_url)} target="_blank" rel="noopener noreferrer">
+                        <a href={getAuthenticatedFileUrl(selectedCandidate.resume_url || selectedCandidate.cv_url)} target="_blank" rel="noopener noreferrer">
                           <Eye className="w-3 h-3 mr-1" />
                           View Document
                         </a>

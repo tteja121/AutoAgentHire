@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { API_BASE_URL, getAuthenticatedFileUrl } from '@/lib/api';
+import { API_BASE_URL, getAuthenticatedFileUrl, apiClient, API_ENDPOINTS } from '@/lib/api';
 import { applicationService } from '@/services/applicationService';
 import { applyProfileFromResume } from '@/utils/profileSync';
 
@@ -90,17 +90,8 @@ export default function ResumeParserPage() {
       const savedEmail = localStorage.getItem('candidate_email');
       if (savedEmail) uploadForm.append('user_email', savedEmail);
 
-      const token = localStorage.getItem('authToken');
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const uploadResp = await fetch(`${API_BASE_URL}/api/upload-resume`, {
-        method: 'POST',
-        headers,
-        body: uploadForm,
-      });
-
-      if (uploadResp.ok) {
+      const resp = await apiClient.postFormData('/api/upload-resume', uploadForm);
+      if (resp.data) {
         setIsSavedToProfile(true);
         loadUserResumes();
         toast({
@@ -153,20 +144,12 @@ export default function ResumeParserPage() {
     }, 250);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/ats/parse-resume`, {
-        method: 'POST',
-        body: formData,
-      });
+      const resp = await apiClient.postFormData(API_ENDPOINTS.ats.parseResume, formData);
 
       clearInterval(progressTimer);
       setParseProgress(100);
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Parsing failed with status ${response.status}`);
-      }
-
-      const res = await response.json();
+      const res = resp.data || {};
       setRawText(res.text || '');
       setTextLength(res.length || 0);
 
@@ -184,11 +167,13 @@ export default function ResumeParserPage() {
       // Automatically persist to profile
       saveResumeToProfile(targetFile);
     } catch (err: any) {
+      clearInterval(progressTimer);
       console.error('Resume parse error:', err);
-      setError(err.message || 'Failed to extract details from resume.');
+      const detail = err?.response?.data?.detail || err?.message || 'Could not parse resume.';
+      setError(detail);
       toast({
         title: 'Parse Failed',
-        description: err.message || 'Could not parse resume.',
+        description: detail,
         variant: 'destructive',
       });
     } finally {

@@ -42,7 +42,6 @@ const Onboarding = () => {
     maxApplications: 25,
     enableAICoverLetters: true,
     enableNotifications: true,
-    geminiApiKey: "",
   });
 
   const handleFileUpload = async (file: File) => {
@@ -365,20 +364,14 @@ const Onboarding = () => {
                   onCheckedChange={(checked) => setFormData({ ...formData, enableNotifications: !!checked })}
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Gemini API Key (Optional)</label>
-                <Input
-                  type="password"
-                  placeholder="AIza..."
-                  value={formData.geminiApiKey}
-                  onChange={(e) => setFormData({ ...formData, geminiApiKey: e.target.value })}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  For AI-powered cover letters. Get your key at{" "}
-                  <a href="https://makersuite.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary">
-                    Google AI Studio
-                  </a>
-                </p>
+              <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex items-start gap-3">
+                <Sparkles className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-foreground">AI Intelligence Engine Active</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Personalized cover letters and resume analysis are powered automatically by the backend Google Gemini LLM engine. No client API key setup is required.
+                  </p>
+                </div>
               </div>
             </div>
           </motion.div>

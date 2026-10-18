@@ -18,7 +18,6 @@ const sidebarLinks = [
   { name: "Job Automation", href: "/dashboard/automation", icon: Play },
   { name: "Resume Parser", href: "/dashboard/resume", icon: FileText },
   { name: "Profile", href: "/dashboard/profile", icon: User },
-  { name: "Help & Support", href: "/dashboard/help", icon: HelpCircle },
 ];
 
 interface NotificationItem {
@@ -647,7 +646,7 @@ export const DashboardLayout = () => {
                         className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
                       >
                         <Settings className="w-4 h-4 text-muted-foreground" />
-                        <span>Account & API Settings</span>
+                        <span>Account & Security Settings</span>
                       </Link>
                     </div>
 

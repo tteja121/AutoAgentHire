@@ -122,32 +122,23 @@ apiClient._axios.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
-// Response interceptor – global 401 handler
+// Response interceptor – pass errors to caller without hijacking user navigation
 apiClient._axios.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error) => {
+    // Only clear token if an explicit session check on /auth/me returns 401
     if (error.response?.status === 401) {
-      // Don't auto-redirect or wipe token if user is actively attempting to log in, on auth callback, or fetching profile
       const url = error.config?.url || '';
-      const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/signup') || url.includes('/auth/me');
-      const isAuthPage = typeof window !== 'undefined' && (
-        window.location.pathname === '/login' ||
-        window.location.pathname === '/signup' ||
-        window.location.pathname === '/auth/callback'
-      );
-      
-      if (!isAuthEndpoint && !isAuthPage) {
-        const keysToRemove = [
-          'authToken', 'userRole', 'candidate_email', 'candidate_name',
-          'candidate_phone', 'candidate_location', 'candidate_headline',
-          'candidate_avatar_url', 'candidate_experience', 'candidate_summary',
-          'candidate_skills', 'candidate_skills_str', 'candidate_resume_name',
-          'candidate_profile', 'client_applied_applications', 'userProfile',
-          'resumeData', 'resumePath', 'jobSearchConfig',
-        ];
-        keysToRemove.forEach((k) => localStorage.removeItem(k));
-        try { sessionStorage.clear(); } catch (_) {}
-        window.location.href = '/login';
+      if (url.includes('/auth/me')) {
+        const isAuthPage = typeof window !== 'undefined' && (
+          window.location.pathname === '/login' ||
+          window.location.pathname === '/signup' ||
+          window.location.pathname === '/auth/callback'
+        );
+        if (!isAuthPage) {
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('userRole');
+        }
       }
     }
     return Promise.reject(error);

@@ -196,7 +196,7 @@ const App = () => (
                 <Route path="resume" element={<ResumeParserPage />} />
                 <Route path="profile" element={<ProfilePage />} />
                 <Route path="settings" element={<ApiKeySettings />} />
-                <Route path="help" element={<DashboardHome />} />
+                <Route path="help" element={<Navigate to="/dashboard" replace />} />
                 <Route path="ats" element={<Navigate to="/candidate/jobs" replace />} />
               </Route>
               <Route path="*" element={<NotFound />} />

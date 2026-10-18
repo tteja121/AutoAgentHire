@@ -21,13 +21,13 @@ except ImportError:
 if settings is not None and getattr(settings, "SECRET_KEY", None):
     SECRET_KEY: str = validate_secret_key_value(settings.SECRET_KEY)
     ALGORITHM: str = getattr(settings, "ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 30)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 10080)
 else:
     # Must refuse to start without a valid strong secret
     raw_key = os.environ.get("SECRET_KEY", "")
     SECRET_KEY = validate_secret_key_value(raw_key)
     ALGORITHM = os.environ.get("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 
 
 def create_access_token(

@@ -95,7 +95,7 @@ export default function DashboardHome() {
             salary_description: j.salary_min && j.salary_max ? `$${j.salary_min.toLocaleString()} - $${j.salary_max.toLocaleString()}` : "Competitive",
           })));
         } else {
-          const res = await apiClient.get("/recruiter/candidate/jobs");
+          const res = await apiClient.get(API_ENDPOINTS.recruiter.candidateJobs);
           if (Array.isArray(res.data)) {
             setFeaturedJobs(res.data.slice(0, 3));
           }

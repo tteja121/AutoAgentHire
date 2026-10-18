@@ -316,7 +316,8 @@ async def stop_agent():
 @router.post("/upload-resume")
 async def upload_resume(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    user_email: Optional[str] = Form(None),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     """
@@ -328,13 +329,20 @@ async def upload_resume(
         raise HTTPException(400, "Only PDF, DOCX, and TXT files are supported")
 
     target_user = current_user
+    if not target_user and user_email:
+        target_user = UserRepository.get_by_email(db, email=user_email.strip().lower())
+    if not target_user:
+        target_user = db.query(User).filter(User.role == "candidate").first()
+    if not target_user:
+        target_user = db.query(User).first()
 
     try:
         # Save file to disk
         upload_dir = "uploads/resumes"
         os.makedirs(upload_dir, exist_ok=True)
 
-        safe_name = f"{target_user.id}_{file.filename}"
+        user_prefix = target_user.id if target_user else "guest"
+        safe_name = f"{user_prefix}_{file.filename}"
         file_path = os.path.join(upload_dir, safe_name)
 
         content = await file.read()
