@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { 
-  Bot, Mail, Lock, Eye, EyeOff, ArrowRight, Briefcase, 
+  Bot, Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft, Briefcase, 
   ShieldCheck, Clock, AlertTriangle, User, KeyRound,
   CheckCircle2, Sparkles
 } from "lucide-react";
@@ -202,6 +202,17 @@ const Login = () => {
             </div>
             <span className="text-xl font-bold">AutoAgentHire</span>
           </Link>
+
+          {/* Back to Home / Landing Page */}
+          <div>
+            <Link
+              to="/"
+              className="inline-flex items-center gap-2 text-xs md:text-sm font-medium text-muted-foreground hover:text-foreground transition-colors group"
+            >
+              <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+              <span>Back to Home</span>
+            </Link>
+          </div>
 
           {/* Heading */}
           <div>

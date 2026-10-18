@@ -1,9 +1,13 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Bot, ArrowRight, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const HeroSection = () => {
+  const [isDemoOpen, setIsDemoOpen] = useState(false);
+
   return (
     <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden pt-20">
       {/* Background effects */}
@@ -63,11 +67,45 @@ export const HeroSection = () => {
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Link>
           </Button>
-          <Button variant="heroOutline" size="xl">
-            <Play className="w-5 h-5" />
+          <Button
+            variant="heroOutline"
+            size="xl"
+            onClick={() => setIsDemoOpen(true)}
+            className="group cursor-pointer hover:border-primary/50"
+          >
+            <Play className="w-5 h-5 text-primary group-hover:scale-110 transition-transform" />
             Watch Demo
           </Button>
         </motion.div>
+
+        {/* Watch Demo Modal */}
+        <Dialog open={isDemoOpen} onOpenChange={setIsDemoOpen}>
+          <DialogContent className="max-w-4xl p-2 md:p-6 bg-card/95 border-primary/20 backdrop-blur-2xl shadow-2xl">
+            <DialogHeader className="px-2 pt-2 pb-1">
+              <DialogTitle className="text-xl font-bold flex items-center gap-2 text-foreground">
+                <Bot className="w-5 h-5 text-primary" />
+                AutoAgentHire — Platform Walkthrough Demo
+              </DialogTitle>
+            </DialogHeader>
+            <div className="relative aspect-video rounded-xl overflow-hidden bg-black/95 mt-3 border border-white/10 shadow-inner">
+              <video
+                src="/demo/autoagenthire_demo.webm"
+                controls
+                autoPlay
+                playsInline
+                className="w-full h-full object-contain"
+              >
+                Your browser does not support the video tag.
+              </video>
+            </div>
+            <div className="px-2 pt-2 flex items-center justify-between text-xs text-muted-foreground">
+              <span>AutoAgentHire — Connecting Talent with Opportunity</span>
+              <Button size="sm" variant="ghost" asChild>
+                <Link to="/signup">Try Free Now →</Link>
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Stats preview */}
         <motion.div

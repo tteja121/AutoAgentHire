@@ -1,364 +1,259 @@
-🚀 AutoAgent Hire – LinkedIn Job Automation with AI
+<div align="center">
 
-Autonomous AI agent that discovers, fills, and submits LinkedIn Easy Apply jobs intelligently on your behalf.
+# 🤖 AutoAgentHire
+### Autonomous AI-Powered Hiring & Job Automation Ecosystem
 
-🌟 Quick Overview
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688.svg?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB.svg?style=flat-square&logo=react)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6.svg?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
+[![Vite](https://img.shields.io/badge/Vite-7.3-646CFF.svg?style=flat-square&logo=vite)](https://vitejs.dev)
+[![MongoDB Atlas](https://img.shields.io/badge/MongoDB%20Atlas-Active%20Cluster-47A248.svg?style=flat-square&logo=mongodb)](https://www.mongodb.com/atlas)
+[![SQLite](https://img.shields.io/badge/SQLite-ACID%20Engine-003B57.svg?style=flat-square&logo=sqlite)](https://sqlite.org)
+[![Playwright](https://img.shields.io/badge/Playwright-1.48-2EAD33.svg?style=flat-square&logo=playwright)](https://playwright.dev)
+[![Vercel](https://img.shields.io/badge/Vercel-Deployed-000000.svg?style=flat-square&logo=vercel)](https://auto-agent-hire.vercel.app)
+[![Render](https://img.shields.io/badge/Render-Deployed-46E3B7.svg?style=flat-square&logo=render)](https://autoagenthire.onrender.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
-AutoAgent Hire is a full-stack AI automation system that:
+<br />
 
-Logs into LinkedIn using a persistent browser profile
+**Connecting Talent with Opportunity Through Autonomous Intelligence**
 
-Finds Easy Apply jobs based on keywords & location
+[🌐 Live Frontend (Vercel)](https://auto-agent-hire.vercel.app) • [⚙️ Backend API (Render)](https://autoagenthire.onrender.com) • [📖 API Documentation](https://autoagenthire.onrender.com/docs)
 
-Fills multi-step application forms automatically
+</div>
 
-Uses AI to answer unknown/custom fields
+---
 
-Uploads resume dynamically
+## 🌟 Executive Summary
 
-Submits applications (or runs in dry-run mode)
+**AutoAgentHire** is a modern, enterprise-ready full-stack AI automation platform designed to bridge the gap between job candidates and recruiters. By fusing autonomous agent workflows, resume intelligence, and role-based governance, AutoAgentHire automates the tedious aspects of the modern job search while providing hiring teams with precision candidate evaluation.
 
-Tracks results in real-time
+* **For Candidates**: Autonomous multi-step job application automation, ATS resume scoring, keyword gap analysis, and tailored AI cover letter generation.
+* **For Recruiters**: Dedicated portal for posting vacancies, reviewing candidate resumes, managing applicant statuses, and scheduling interviews with Pacific Time deadline controls.
+* **For Organizations & Authorizers**: Multi-tenant RBAC governance requiring authoritative verification before employer accounts can access candidate dossiers.
 
-Stores user profiles securely in MongoDB Atlas
+---
 
-Built with FastAPI, Playwright, React, MongoDB Atlas, and modern AI APIs.
+## 🏗 System Architecture
 
-🏗 Architecture
-+---------------------------------------------------------+
-|                    USER BROWSER                         |
-|     React + Vite + TypeScript (Frontend - Vercel)      |
-+---------------------------------------------------------+
-                          | HTTP REST
-+---------------------------------------------------------+
-|                 FastAPI Backend (Render)                |
-|                                                         |
-|  +-------------+  +-------------+  +----------------+  |
-|  |  Auth (JWT) |  | Automation  |  |   AI Engine    |  |
-|  | bcrypt      |  | Playwright  |  | Multi-provider |  |
-|  +-------------+  +-------------+  +----------------+  |
-|                                                         |
-|   MongoDB Atlas / SQLite    AI Providers (Cloud APIs)  |
-+---------------------------------------------------------+
-🧠 Core Features
-🤖 AI-Powered Form Filling
+```mermaid
+graph TD
+    subgraph Client Tier ["Client Tier (Vercel)"]
+        UI["React 18 + Vite + TypeScript UI<br/>(Tailwind CSS & Shadcn UI)"]
+        Landing["Landing & Pricing Engine"]
+        CandidateDash["Candidate Portal & ATS Hub"]
+        RecruiterDash["Recruiter Management Portal"]
+        AuthDash["Authorizer Governance Hub"]
+    end
 
-Automatically fills known fields from user profile
+    subgraph API Tier ["Backend Tier (Render)"]
+        FastAPI["FastAPI High-Performance Engine"]
+        AuthMiddleware["JWT & RBAC Security Middleware"]
+        AgentRunner["Playwright Autonomous Agent Runner"]
+        ATSScanner["ATS Parsing & Keyword Scorer"]
+        EmailService["Verification & Notification Service"]
+    end
 
-Uses AI fallback for unknown/custom fields
+    subgraph Data & AI Tier ["Data & Cloud Tier"]
+        SQLite[("Primary SQLite Database<br/>(ACID Transactions)")]
+        Mongo[("MongoDB Atlas Cluster0<br/>(Document Analytics & Sync)")]
+        Gemini["Google Gemini 1.5 Flash"]
+        Groq["Groq Cloud LPU Engine"]
+        GitHubModels["GitHub Models / OpenAI Fallback"]
+    end
 
-AI called only once per unique label
+    UI -->|HTTPS / REST| FastAPI
+    FastAPI --> AuthMiddleware
+    AuthMiddleware --> SQLite
+    FastAPI --> Mongo
+    FastAPI --> AgentRunner
+    FastAPI --> ATSScanner
+    FastAPI --> EmailService
+    ATSScanner --> Gemini
+    AgentRunner --> Groq
+```
 
-Smart provider detection:
+---
 
-GitHub Models (preferred)
+## ✨ Core Platform Capabilities
 
-Groq (fallback)
+### 1. 🤖 Autonomous Job Application Agent
+* **Headless Browser Execution**: Leverages Playwright to navigate complex application workflows autonomously.
+* **Adaptive AI Form Filling**: Identifies form labels, inputs candidate metadata, and utilizes LLM reasoning (Gemini/Groq/OpenAI) to craft concise, contextual answers for dynamic custom questions.
+* **Deduplication Engine**: Employs an intelligent `FieldTracker` that prevents redundant inputs, suppresses infinite loops, and caches field determinations.
 
-OpenAI (final fallback)
+### 2. 🧾 Resume Intelligence & ATS Diagnostics
+* **Multi-Format Extraction**: Parses PDF, DOCX, and TXT resumes to extract core skills, education, employment tenure, and biographical summaries.
+* **Job Matching Matrix**: Compares resumes against job descriptions to produce quantified match scores, missing keyword alerts, and structural formatting tips.
+* **Dynamic Cover Letters**: Synthesizes job description requirements and resume highlights to generate tailored cover letters in seconds.
 
-🔄 Multi-Step Easy Apply Engine
+### 3. 💼 Recruiter Management Portal
+* **Job Posting Studio**: Create, edit, and publish job listings with salary bands, experience tiers, and Pacific Time application deadlines.
+* **Applicant Pipeline**: Review candidate profiles, download verified resumes, update application stages (`applied`, `reviewing`, `shortlisted`, `rejected`), and schedule candidate interviews.
+* **Authorizer Verification Protection**: Enforces an organization-level approval step prior to activating new recruiter workspaces.
 
-Handles unlimited form pages
+### 4. 🛡 Enterprise Governance & Authorizer Control
+* **Role-Based Access Control (RBAC)**: Distinct permissions partitioned for Candidates, Recruiters, and Authorizers.
+* **Zero Data Leakage / IDOR Defense**: Strict user ownership verification ensuring candidates only see their own submissions and recruiters only see applications for their authorized postings.
+* **Audit Trail**: Logs user actions, security status transitions, and agent runs.
 
-Smart Next / Review / Submit detection
+### 5. 🗄 Resilient Dual-Database Architecture
+* **SQLite Primary**: Provides lightweight, ACID-compliant local transactions with sub-second startup performance.
+* **MongoDB Atlas Document Store**: Provides cloud synchronization (`autoagenthire` cluster) for multi-node deployments, document archives, and search queries with automatic TLS 1.3 verification and connection pooling.
 
-Validation error re-check
+---
 
-Resume upload support
+## 📁 Repository Structure
 
-Safe exit if form gets stuck
-
-🧾 Resume Intelligence
-
-Parses PDF/DOCX
-
-Extracts:
-
-Skills
-
-Experience
-
-Education
-
-Summary
-
-Used for:
-
-Field prefill
-
-AI contextual answers
-
-Job matching
-
-🛡 FieldTracker Protection
-
-Prevents duplicate field filling
-
-Prevents infinite loops
-
-Prevents repeated AI calls
-
-Each field processed once
-
-🧑‍💻 Full Authentication System
-
-Signup / Login
-
-JWT authentication
-
-Password hashing using bcrypt
-
-User profile stored in PostgreSQL
-
-⚡ Performance Optimizations
-
-Headless Chromium
-
-Explicit waits (no sleep-based logic)
-
-Field deduplication
-
-AI caching
-
-Subprocess-based automation isolation
-
-📁 Project Structure
-LinkedIn-Job-Automation-with-AI/
-│
+```text
+AUTOAGENTHIRE/
 ├── backend/
-│   ├── main.py
-│   ├── core/
-│   │   ├── config.py
-│   │   ├── security.py
-│   │   └── logging.py
-│   ├── database/
-│   │   ├── session.py
-│   │   ├── models.py
-│   │   └── crud.py
-│   ├── routes/
-│   │   ├── auth_routes.py
-│   │   └── automation_routes.py
-│   ├── automation/
-│   │   ├── playwright_runner.py
-│   │   ├── field_mapper.py
-│   │   └── field_tracker.py
-│   ├── llm/
-│   │   ├── provider_manager.py
-│   │   └── ai_fallback.py
-│   ├── parsers/
-│   │   └── resume_parser.py
-│   ├── rag/
-│   └── utils/
+│   ├── api/                 # API router registrations and endpoints
+│   ├── auth/                # JWT dependencies, hashing, and token handlers
+│   ├── config.py            # Pydantic Settings and environment configuration
+│   ├── database/            # SQLAlchemy models, SQLite connection, Mongo manager
+│   ├── llm/                 # Gemini, Groq, and OpenAI service integrations
+│   ├── parsers/             # Document parsers for PDF/DOCX resumes
+│   ├── rag/                 # Vector embeddings and resume intelligence
+│   ├── routes/              # Route handlers (auth, recruiter, ATS, agent, mongo)
+│   ├── services/            # Email verification and background jobs
+│   ├── build.sh             # Linux cloud build script for Render
+│   └── main.py              # FastAPI application entry point and lifespan
 │
 ├── frontend/
+│   ├── public/              # Static assets, icons, and platform demo video
 │   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── services/
-│   │   ├── hooks/
-│   │   └── lib/
-│   ├── public/
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── README.md
+│   │   ├── components/      # Modular UI components (ATS, landing, layout, ui)
+│   │   ├── hooks/           # Custom React hooks
+│   │   ├── lib/             # API client (Axios) and utility helpers
+│   │   ├── pages/           # Candidate, Recruiter, Authorizer, and Landing pages
+│   │   └── services/        # Frontend API service layer
+│   ├── package.json         # Frontend dependencies and build scripts
+│   ├── vercel.json          # Vercel deployment and routing rules
+│   └── vite.config.ts       # Vite bundler configuration
 │
-├── scripts/
-├── docker/
-├── uploads/        (gitignored)
-├── data/           (gitignored)
-├── requirements.txt
-├── render.yaml
-├── Procfile
-├── .env.example
-└── README.md
-🔄 Automation Flow
-1. User fills profile in React UI
-2. POST /api/v2/start-automation
-3. Backend spawns Playwright subprocess
-4. Browser:
-    - Searches Easy Apply jobs
-    - Loops through job cards
-    - Fills known fields
-    - AI handles unknown fields
-    - Uploads resume
-    - Clicks Next → Submit
-5. Frontend polls status
-6. Results stored in PostgreSQL
-🧩 AI Field Handling Logic
+├── scripts/                 # Operational scripts (seed DB, test Mongo, health checks)
+├── tests/                   # Pytest suite (data isolation, RBAC, IDOR tests)
+├── .gitattributes           # Cross-platform LF line ending enforcement
+├── .python-version          # Python 3.11.11 version pin
+├── build.sh                 # Cloud build automation script
+├── render.yaml              # Render infrastructure-as-code specification
+├── requirements.txt         # Core Python framework dependencies
+├── requirements-prod.txt    # Cloud-optimized production dependencies
+└── vercel.json              # Monorepo Vercel routing configuration
+```
 
-For unknown form fields:
+---
 
-Extract label + context
+## 🚀 Quickstart Guide
 
-Send to AI provider
+### Prerequisites
+* **Python**: `3.11.x`
+* **Node.js**: `18.x` or higher
+* **npm**: `9.x` or higher
+* **MongoDB Atlas** account (or local MongoDB)
 
-Receive short relevant answer
+### 1. Clone & Set Up Virtual Environment
 
-Cache result
+```bash
+# Clone the repository
+git clone https://github.com/tteja121/AutoAgentHire.git
+cd AutoAgentHire
 
-Fill once
+# Create and activate Python virtual environment
+python -m venv venv
+.\venv\Scripts\activate      # Windows (PowerShell)
+# source venv/bin/activate    # Linux / macOS
 
-Skip if AI returns nothing
-
-AI is never called more than once per label.
-
-🛠 Local Development
-Requirements
-
-Python 3.11+
-
-Node.js 18+
-
-MongoDB Atlas (or local SQLite)
-
-Setup
-1️⃣ Clone Repository
-git clone https://github.com/yourusername/LinkedIn-Job-Automation-with-AI.git
-cd LinkedIn-Job-Automation-with-AI
-2️⃣ Backend Setup
-python -m venv .venv
-.venv\Scripts\activate     # Windows
+# Install backend dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
 playwright install chromium
-3️⃣ Environment Variables
+```
 
-Copy .env.example → .env
+### 2. Configure Environment Variables
 
-# LinkedIn
-LINKEDIN_EMAIL=
-LINKEDIN_PASSWORD=
+Create `backend/.env` (or copy from `.env.example`):
 
-# AI
-GITHUB_API_KEY=
-GROQ_API_KEY=
-OPENAI_API_KEY=
+```ini
+APP_NAME=AutoAgentHire
+APP_ENV=development
+DEBUG=true
+PORT=8000
+SECRET_KEY=your-secure-32-character-secret-key
 
-# Database
-DATABASE_URL=postgresql://user:pass@host:5432/dbname
+# MongoDB Atlas
+MONGODB_URI=mongodb+srv://<user>:<password>@cluster0.amc4psk.mongodb.net/autoagenthire?retryWrites=true&w=majority
+MONGODB_DB_NAME=autoagenthire
 
-# Auth
-SECRET_KEY=your-32-char-secret
+# AI APIs
+GEMINI_API_KEY=your-gemini-api-key
+GROQ_API_KEY=your-groq-api-key
+OPENAI_API_KEY=your-openai-api-key
 
-# Defaults
-JOB_KEYWORDS=Software Engineer
-JOB_LOCATION=India
-MAX_APPLICATIONS=5
-TEST_MODE=true
-4️⃣ Run Backend
-uvicorn backend.main:app --reload --port 8000
+# CORS
+CORS_ORIGINS=http://localhost:5173,http://localhost:8000,https://auto-agent-hire.vercel.app
+```
 
-Swagger:
+### 3. Start the Backend Server
 
-http://localhost:8000/docs
-5️⃣ Frontend
+```bash
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+```
+* Interactive API Documentation (Swagger): `http://127.0.0.1:8000/docs`
+* Health Endpoint: `http://127.0.0.1:8000/health`
+
+### 4. Start the Frontend Application
+
+In a separate terminal:
+
+```bash
 cd frontend
 npm install
 npm run dev
+```
+* Web Application: `http://localhost:5173` (or `http://localhost:8080`)
 
-Open:
+---
 
-http://localhost:8080
-🚀 Deployment
-Backend → Render
+## 🧪 Testing & Verification
 
-Push repo to GitHub
+AutoAgentHire includes an automated security test suite that validates role separation, IDOR protection, and cross-account data isolation:
 
-Create new Web Service on Render
+```bash
+# Run security and data isolation tests
+pytest tests/test_data_isolation.py -v
 
-Connect repository
+# Verify MongoDB Atlas live connectivity
+python scripts/test_mongo_connection.py
+```
 
-Add environment variables in Render dashboard:
+---
 
-DATABASE_URL
+## 🌐 Production Cloud Deployment
 
-SECRET_KEY
+### Backend (Render)
+* **Service Type**: Web Service
+* **Build Command**: `bash ./build.sh`
+* **Start Command**: `python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+* **Environment**: Python 3.11 (`.python-version` included)
+* **Configuration**: Defined declaratively in [`render.yaml`](file:///c:/Users/mryte/OneDrive/Desktop/AUTOAGENTHIRE/render.yaml).
 
-LINKEDIN_EMAIL
+### Frontend (Vercel)
+* **Framework**: Vite
+* **Root Directory**: `frontend`
+* **Build Command**: `npm run build`
+* **Output Directory**: `dist`
+* **Environment Variables**:
+  * `VITE_API_URL`: `https://autoagenthire.onrender.com`
+  * `VITE_API_BASE_URL`: `https://autoagenthire.onrender.com`
 
-LINKEDIN_PASSWORD
+---
 
-AI keys
+## 📄 License
 
-CORS_ORIGINS
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
 
-Backend URL:
-
-https://your-backend.onrender.com
-Frontend → Vercel
-
-Import project in Vercel
-
-Set root directory: frontend
-
-Add:
-
-VITE_API_URL=https://your-backend.onrender.com
-
-Deploy.
-
-🔐 Security Notes
-
-All secrets stored in environment variables
-
-.env never committed
-
-JWT expiration enabled
-
-Passwords hashed with bcrypt
-
-No hardcoded credentials
-
-Browser runs isolated subprocess
-
-⚠ Limitations
-
-LinkedIn UI changes may break selectors
-
-CAPTCHA may require manual solve
-
-High-volume automation may trigger security checks
-
-Intended for educational/demo use
-
-📊 API Endpoints
-Method	Endpoint	Description
-GET	/health	Health check
-POST	/auth/signup	Register
-POST	/auth/login	Login
-POST	/api/v2/start-automation	Start bot
-GET	/api/v2/automation-status/{id}	Poll status
-GET	/api/v2/automation-results/{id}	Get results
-POST	/api/v1/resume/upload	Upload resume
-🧪 Troubleshooting
-Issue	Solution
-DB connection error	Verify DATABASE_URL
-CORS error	Set CORS_ORIGINS correctly
-AI not answering fields	Ensure AI key configured
-Automation stuck	Run once with headless=false
-Playwright not installed	Run playwright install chromium
-📈 Why This Project Is Powerful
-
-This project demonstrates:
-
-Full-stack engineering
-
-AI integration
-
-Automation engineering
-
-Browser control
-
-JWT auth
-
-Database design
-
-Subprocess management
-
-Production deployment
-
-This is not a basic student project — it is a real-world AI automation system.
-
-📜 License
-
-MIT License
+<div align="center">
+<sub>Built with precision for the modern future of autonomous recruiting.</sub>
+</div>
