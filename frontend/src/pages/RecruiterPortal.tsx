@@ -20,6 +20,7 @@ import { jobsService } from "@/services/jobsService";
 import { applicationsService } from "@/services/applicationsService";
 import { companiesService } from "@/services/companiesService";
 import { authService } from "@/services/authService";
+import { useToast } from "@/hooks/use-toast";
 
 const PERSONAL_DOMAINS = [
   "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com",

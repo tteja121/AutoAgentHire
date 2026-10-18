@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { apiClient, API_ENDPOINTS } from "./lib/api";
 
 // Code-split route components for fast page loads and smooth navigation
@@ -143,59 +144,61 @@ const App = () => (
           v7_relativeSplatPath: true,
         }}
       >
-        <Suspense fallback={<PageLoading />}>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/auth/callback" element={<AuthCallback />} />
-            <Route path="/auth-callback" element={<AuthCallback />} />
-            <Route path="/callback" element={<AuthCallback />} />
-            <Route path="/onboarding" element={<OnboardingIntegrated />} />
-            {/* Client Portal routes with Sidebar */}
-            <Route element={<DashboardLayout />}>
-              <Route path="/ats-checker" element={<Navigate to="/candidate/jobs" replace />} />
-              <Route path="/candidate/jobs" element={<CandidateJobsPage />} />
-            </Route>
-            <Route
-              path="/recruiter"
-              element={
-                <RoleProtectedRoute allowedRoles={["recruiter"]}>
-                  <RecruiterPortal />
-                </RoleProtectedRoute>
-              }
-            />
-            <Route path="/recruiter/register" element={<RecruiterRegister />} />
-            <Route
-              path="/authorizer"
-              element={
-                <RoleProtectedRoute allowedRoles={["authorizer"]}>
-                  <AuthorizerPortal />
-                </RoleProtectedRoute>
-              }
-            />
-            <Route
-              path="/dashboard"
-              element={
-                <RoleProtectedRoute allowedRoles={["candidate", "admin"]}>
-                  <DashboardLayout />
-                </RoleProtectedRoute>
-              }
-            >
-              <Route index element={<DashboardHome />} />
-              <Route path="jobs" element={<CandidateJobsPage />} />
-              <Route path="search" element={<Navigate to="/candidate/jobs" replace />} />
-              <Route path="applications" element={<Applications />} />
-              <Route path="automation" element={<AutomationPage />} />
-              <Route path="resume" element={<ResumeParserPage />} />
-              <Route path="profile" element={<ProfilePage />} />
-              <Route path="settings" element={<ApiKeySettings />} />
-              <Route path="help" element={<DashboardHome />} />
-              <Route path="ats" element={<Navigate to="/candidate/jobs" replace />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<PageLoading />}>
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/auth/callback" element={<AuthCallback />} />
+              <Route path="/auth-callback" element={<AuthCallback />} />
+              <Route path="/callback" element={<AuthCallback />} />
+              <Route path="/onboarding" element={<OnboardingIntegrated />} />
+              {/* Client Portal routes with Sidebar */}
+              <Route element={<DashboardLayout />}>
+                <Route path="/ats-checker" element={<Navigate to="/candidate/jobs" replace />} />
+                <Route path="/candidate/jobs" element={<CandidateJobsPage />} />
+              </Route>
+              <Route
+                path="/recruiter"
+                element={
+                  <RoleProtectedRoute allowedRoles={["recruiter"]}>
+                    <RecruiterPortal />
+                  </RoleProtectedRoute>
+                }
+              />
+              <Route path="/recruiter/register" element={<RecruiterRegister />} />
+              <Route
+                path="/authorizer"
+                element={
+                  <RoleProtectedRoute allowedRoles={["authorizer"]}>
+                    <AuthorizerPortal />
+                  </RoleProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard"
+                element={
+                  <RoleProtectedRoute allowedRoles={["candidate", "admin"]}>
+                    <DashboardLayout />
+                  </RoleProtectedRoute>
+                }
+              >
+                <Route index element={<DashboardHome />} />
+                <Route path="jobs" element={<CandidateJobsPage />} />
+                <Route path="search" element={<Navigate to="/candidate/jobs" replace />} />
+                <Route path="applications" element={<Applications />} />
+                <Route path="automation" element={<AutomationPage />} />
+                <Route path="resume" element={<ResumeParserPage />} />
+                <Route path="profile" element={<ProfilePage />} />
+                <Route path="settings" element={<ApiKeySettings />} />
+                <Route path="help" element={<DashboardHome />} />
+                <Route path="ats" element={<Navigate to="/candidate/jobs" replace />} />
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

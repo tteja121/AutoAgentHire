@@ -256,8 +256,8 @@ export default function JobAutomation() {
       const recipientEmail = clientEmail || profile?.email || 'candidate@example.com';
       const recipientName = clientName || profile?.candidate_name || 'Candidate';
       const recipientPhone = clientPhone || profile?.phone || '';
-      const verifiedExp = clientExperience || profile?.experience || 'Experience verified from resume';
-      const resumeName = resumeFile?.name || profile?.resume_name || 'resume.pdf';
+      const verifiedExp = clientExperience || (profile as any)?.experience || 'Experience verified from resume';
+      const resumeName = resumeFile?.name || (profile as any)?.resume_name || 'resume.pdf';
 
       // Mark as applied locally
       setMatchedJobs(prev =>
@@ -332,8 +332,8 @@ export default function JobAutomation() {
       const recipientEmail = (clientEmail || profile?.email || '').trim();
       const recipientName = (clientName || profile?.candidate_name || 'Candidate').trim();
       const recipientPhone = (clientPhone || profile?.phone || '').trim();
-      const verifiedExp = (clientExperience || profile?.experience || 'Experience verified from resume').trim();
-      const resumeName = resumeFile?.name || profile?.resume_name || 'resume.pdf';
+      const verifiedExp = (clientExperience || (profile as any)?.experience || 'Experience verified from resume').trim();
+      const resumeName = resumeFile?.name || (profile as any)?.resume_name || 'resume.pdf';
 
       // 1. Send batch application to backend endpoint and store in Client Store
       await applicationService.applyBatchApplications({
