@@ -11,11 +11,19 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc, and_, or_
 
-from backend.database.models_complete import (
-    User, Resume, AgentRun, Application, 
-    AgentLog, JobCache, FileStorage, AnalyticsEvent,
-    Notification
-)
+try:
+    from backend.database.models_complete import (
+        User, Resume, AgentRun, Application, 
+        AgentLog, JobCache, FileStorage, AnalyticsEvent,
+        Notification
+    )
+except ImportError:
+    from database.models_complete import (  # type: ignore[no-redef]
+        User, Resume, AgentRun, Application, 
+        AgentLog, JobCache, FileStorage, AnalyticsEvent,
+        Notification
+    )
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -595,8 +603,12 @@ def create_user(db: Session, email: str, hashed_password: str = "", full_name: s
     """Delegate to UserRepository."""
     if not hashed_password:
         import uuid as _uuid
-        from backend.auth.password import hash_password
+        try:
+            from backend.auth.password import hash_password
+        except ImportError:
+            from auth.password import hash_password  # type: ignore[no-redef]
         hashed_password = hash_password(_uuid.uuid4().hex)
+
     return UserRepository.create(db, email=email, hashed_password=hashed_password, full_name=full_name, role=role, **kwargs)
 
 

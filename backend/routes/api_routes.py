@@ -14,11 +14,19 @@ import re
 from pathlib import Path
 from datetime import datetime, timezone
 
-from backend.database.connection import get_db
-from backend.database.crud import UserRepository, ResumeRepository, NotificationRepository
-from backend.auth.dependencies import get_current_user, get_current_user_optional
-from backend.database.models_complete import User, JobApplication, JobPosting, Application, Resume, AuditLog, Notification
-from backend.auth.validators import validate_email_format, validate_phone_number
+try:
+    from backend.database.connection import get_db
+    from backend.database.crud import UserRepository, ResumeRepository, NotificationRepository
+    from backend.auth.dependencies import get_current_user, get_current_user_optional
+    from backend.database.models_complete import User, JobApplication, JobPosting, Application, Resume, AuditLog, Notification
+    from backend.auth.validators import validate_email_format, validate_phone_number
+except ImportError:
+    from database.connection import get_db  # type: ignore[no-redef]
+    from database.crud import UserRepository, ResumeRepository, NotificationRepository  # type: ignore[no-redef]
+    from auth.dependencies import get_current_user, get_current_user_optional  # type: ignore[no-redef]
+    from database.models_complete import User, JobApplication, JobPosting, Application, Resume, AuditLog, Notification  # type: ignore[no-redef]
+    from auth.validators import validate_email_format, validate_phone_number  # type: ignore[no-redef]
+
 
 logger = logging.getLogger(__name__)
 
@@ -358,12 +366,15 @@ async def upload_resume(
 
         logger.info(f"Resume uploaded successfully: {file_path} (user_id={target_user.id})")
 
-        # Parse resume
         try:
-            from backend.parsers.resume_parser import ResumeParser
+            try:
+                from backend.parsers.resume_parser import ResumeParser
+            except ImportError:
+                from parsers.resume_parser import ResumeParser
             parser = ResumeParser()
             parsed_data = parser.parse(file_path)
         except Exception as p_err:
+
             logger.warning(f"Resume parser error, using empty data: {p_err}")
             parsed_data = {}
 
@@ -639,7 +650,10 @@ def request_email_verification(
 
     # Check official domain restrictions for Authorizers & Recruiters
     if current_user.role in ("authorizer", "recruiter"):
-        from backend.routes.auth_routes import is_personal_email_domain
+        try:
+            from backend.routes.auth_routes import is_personal_email_domain
+        except ImportError:
+            from routes.auth_routes import is_personal_email_domain  # type: ignore[no-redef]
         if is_personal_email_domain(clean_email):
             email_domain = clean_email.split("@")[-1] if "@" in clean_email else ""
             raise HTTPException(
@@ -661,7 +675,11 @@ def request_email_verification(
 
     import random
     from datetime import datetime, timezone, timedelta
-    from backend.services.email_service import send_email_change_verification_code
+    try:
+        from backend.services.email_service import send_email_change_verification_code
+    except ImportError:
+        from services.email_service import send_email_change_verification_code  # type: ignore[no-redef]
+
 
     code = f"{random.randint(100000, 999999)}"
     setattr(current_user, "pending_email", clean_email)
@@ -794,8 +812,12 @@ def update_user_profile(
         new_email = body.email.strip().lower()
         if new_email != target_user.email.lower():
             if target_user.role in ("authorizer", "recruiter"):
-                from backend.routes.auth_routes import is_personal_email_domain
+                try:
+                    from backend.routes.auth_routes import is_personal_email_domain
+                except ImportError:
+                    from routes.auth_routes import is_personal_email_domain  # type: ignore[no-redef]
                 if is_personal_email_domain(new_email):
+
                     email_domain = new_email.split("@")[-1] if "@" in new_email else ""
                     raise HTTPException(
                         status_code=400,
@@ -1080,7 +1102,11 @@ async def generate_cover_letter(
     Supports multiple AI providers: gemini, groq, openai
     """
     try:
-        from backend.llm.multi_ai_service import MultiAIService, AIProvider
+        try:
+            from backend.llm.multi_ai_service import MultiAIService, AIProvider
+        except ImportError:
+            from llm.multi_ai_service import MultiAIService, AIProvider  # type: ignore[no-redef]
+
         
         # Validate provider
         valid_providers = ["gemini", "groq", "openai"]
@@ -1146,7 +1172,11 @@ async def answer_application_question(
     Supports multiple AI providers: gemini, groq, openai
     """
     try:
-        from backend.llm.multi_ai_service import MultiAIService
+        try:
+            from backend.llm.multi_ai_service import MultiAIService
+        except ImportError:
+            from llm.multi_ai_service import MultiAIService  # type: ignore[no-redef]
+
         
         # Validate provider
         valid_providers = ["gemini", "groq", "openai"]
@@ -1203,8 +1233,13 @@ async def match_profile(
     Supports multiple AI providers: gemini, groq, openai
     """
     try:
-        from backend.parsers.resume_parser import ResumeParser
-        from backend.matching.profile_matcher import ProfileMatcher
+        try:
+            from backend.parsers.resume_parser import ResumeParser
+            from backend.matching.profile_matcher import ProfileMatcher
+        except ImportError:
+            from parsers.resume_parser import ResumeParser  # type: ignore[no-redef]
+            from matching.profile_matcher import ProfileMatcher  # type: ignore[no-redef]
+
         
         # Validate provider
         valid_providers = ["gemini", "groq", "openai"]
@@ -1270,8 +1305,13 @@ async def batch_match_jobs(
     """
     try:
         import json
-        from backend.parsers.resume_parser import ResumeParser
-        from backend.matching.profile_matcher import ProfileMatcher
+        try:
+            from backend.parsers.resume_parser import ResumeParser
+            from backend.matching.profile_matcher import ProfileMatcher
+        except ImportError:
+            from parsers.resume_parser import ResumeParser  # type: ignore[no-redef]
+            from matching.profile_matcher import ProfileMatcher  # type: ignore[no-redef]
+
         
         # Validate provider
         valid_providers = ["gemini", "groq", "openai"]
@@ -1388,7 +1428,10 @@ async def get_applications(
 
             # Bot / agent runs applications belonging to this candidate
             try:
-                from backend.database.models_complete import AgentRun
+                try:
+                    from backend.database.models_complete import AgentRun
+                except ImportError:
+                    from database.models_complete import AgentRun  # type: ignore[no-redef]
                 bot_db_apps = (
                     db.query(Application)
                     .join(AgentRun, Application.agent_run_id == AgentRun.id)
@@ -1603,8 +1646,11 @@ async def execute_agent_workflow(data: Dict[str, Any]):
         app_state.current_phase = "initializing"
         app_state.add_log("INFO", "Initializing automation")
         
-        # Initialize orchestrator
-        from backend.agents.orchestrator import AgentOrchestrator
+        try:
+            from backend.agents.orchestrator import AgentOrchestrator
+        except ImportError:
+            from agents.orchestrator import AgentOrchestrator  # type: ignore[no-redef]
+
         orchestrator = AgentOrchestrator()
         
         # Prepare search criteria - handle both old and new format
