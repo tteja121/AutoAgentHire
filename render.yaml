@@ -7,11 +7,12 @@ services:
     rootDir: .
     buildCommand: "bash ./build.sh"
     startCommand: "python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
     envVars:
       - key: PYTHONUNBUFFERED
         value: "true"
       - key: PYTHON_VERSION
-        value: "3.11.11"
+        value: "3.11"
       - key: APP_ENV
         value: "production"
       - key: DEBUG
@@ -22,8 +23,11 @@ services:
         value: "https://auto-agent-hire.vercel.app,http://localhost:5173"
       - key: DISABLE_LOCAL_VECTOR_STORE
         value: "true"
-      # Required secrets to set in Render Dashboard Environment tab:
-      # - key: SECRET_KEY (Generate: python -c "import secrets; print(secrets.token_urlsafe(32))")
+      - key: SKIP_PLAYWRIGHT_INSTALL
+        value: "1"
+      - key: SECRET_KEY
+        generateValue: true
+      # Optional secrets to set in Render Dashboard Environment tab:
       # - key: MONGODB_URI (e.g. mongodb+srv://hyraiauto_db_user:...@cluster0.amc4psk.mongodb.net/autoagenthire?retryWrites=true&w=majority)
       # - key: MONGODB_DB_NAME (autoagenthire)
       # - key: GEMINI_API_KEY

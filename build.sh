@@ -50,11 +50,16 @@ mkdir -p "$TARGET_DATA_DIR/logs" \
          "$TARGET_DATA_DIR/vectors" \
          "$TARGET_UPLOADS_DIR"
 
-# Install Playwright browser safely (non-fatal if resource constrained on Free tier)
-if command -v playwright &> /dev/null; then
-    echo "Installing Playwright chromium browser..."
-    playwright install chromium || echo "Playwright install skipped/non-fatal"
+# Install Playwright browser safely (skip if SKIP_PLAYWRIGHT_INSTALL is set or on constrained cloud tiers)
+if [ "${SKIP_PLAYWRIGHT_INSTALL:-0}" != "1" ]; then
+    if command -v playwright > /dev/null 2>&1; then
+        echo "Installing Playwright chromium browser (non-fatal)..."
+        playwright install chromium || echo "Playwright browser install skipped (non-fatal on cloud build)"
+    fi
+else
+    echo "Playwright browser installation skipped via SKIP_PLAYWRIGHT_INSTALL=1"
 fi
+
 
 echo "============================================================"
 echo "AutoAgentHire Build Completed Successfully!"

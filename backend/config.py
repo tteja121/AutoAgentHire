@@ -13,6 +13,15 @@ _backend_env = Path(__file__).resolve().parent / ".env"
 _root_env = Path(__file__).resolve().parent.parent / ".env"
 _ENV_FILES = [str(p) for p in [_backend_env, _root_env] if p.exists()]
 
+# In cloud deployments (Render, Fly.io, etc.), if no .env file exists and SECRET_KEY is not set in environment,
+# pre-populate os.environ with a cryptographically secure 256-bit ephemeral key so the server can boot and
+# pass health checks immediately even before the user sets secrets in the dashboard.
+if not os.environ.get("SECRET_KEY") and not _ENV_FILES:
+    import secrets
+    _ephemeral_key = secrets.token_urlsafe(32)
+    os.environ["SECRET_KEY"] = _ephemeral_key
+    print("[WARNING] SECRET_KEY not found in environment or .env. Generated ephemeral 256-bit key for this process.")
+
 KNOWN_INSECURE_SECRETS: Set[str] = {
     "Zf9XeUbaW1GqoXvT9WZfOoMA2ZcjwpcmAybvkWLpBb8",
     "dev-secret-change-in-production",
@@ -57,6 +66,7 @@ def validate_secret_key_value(secret_key: Optional[str]) -> str:
     return key
 
 
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
@@ -74,6 +84,7 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = Field(description="Must be set via environment variable, at least 32 characters, non-placeholder")
+
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days session lifetime
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
