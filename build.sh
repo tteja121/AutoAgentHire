@@ -61,6 +61,22 @@ else
 fi
 
 
+# Register PYTHONPATH paths into virtual environment via .pth file
+python -c "
+import site, sys
+from pathlib import Path
+for s in site.getsitepackages():
+    try:
+        p = Path(s)
+        if p.exists() and p.is_dir():
+            (p / 'autoagenthire_render_paths.pth').write_text(f'{Path.cwd()}\n{Path.cwd().parent}\n')
+            print(f'Configured python path in: {p}')
+            break
+    except Exception:
+        pass
+" 2>/dev/null || true
+
 echo "============================================================"
 echo "AutoAgentHire Build Completed Successfully!"
+
 echo "============================================================"
