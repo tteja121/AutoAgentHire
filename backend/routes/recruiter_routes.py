@@ -638,10 +638,10 @@ def authorize_recruiter_request(
         try:
             from backend.services.email_service import send_recruiter_welcome_email
             send_recruiter_welcome_email(
-                recruiter_email=user.email,
-                recruiter_name=user.full_name or "Recruiter",
-                company_name=user.company_name or "Your Organization",
-                custom_user_id=user.custom_user_id,
+                recruiter_email=str(user.email),
+                recruiter_name=str(user.full_name or "Recruiter"),
+                company_name=str(user.company_name or "Your Organization"),
+                custom_user_id=str(user.custom_user_id or ""),
             )
         except Exception as e:
             pass
