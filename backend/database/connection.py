@@ -22,6 +22,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from backend.database.models_complete import Base
 
 _SQLITE_FALLBACK = 'sqlite:///./data/autoagenthire.db'
+Path('./data').mkdir(parents=True, exist_ok=True)
+
 
 import logging
 # SQL statement echo is disabled by default to maintain clean logs and prevent leaking query parameters.
