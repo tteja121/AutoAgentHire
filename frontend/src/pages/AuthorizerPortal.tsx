@@ -186,6 +186,7 @@ export default function AuthorizerPortal() {
   const [usersList, setUsersList] = useState<UserRecord[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userRoleFilter, setUserRoleFilter] = useState<string>("all");
+  const [userSearchTerm, setUserSearchTerm] = useState<string>("");
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [userTrackingSubTab, setUserTrackingSubTab] = useState<"users" | "jobs" | "audit" | "logins">("users");
 

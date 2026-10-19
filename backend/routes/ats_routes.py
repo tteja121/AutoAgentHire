@@ -388,9 +388,9 @@ async def apply_all_jobs(
     elif candidate_user:
         try:
             if clean_name and clean_name not in ("Applicant", "Candidate"):
-                candidate_user.full_name = clean_name
+                setattr(candidate_user, "full_name", clean_name)
             if clean_phone:
-                candidate_user.phone = clean_phone
+                setattr(candidate_user, "phone", clean_phone)
             db.commit()
         except Exception:
             db.rollback()
@@ -456,14 +456,14 @@ async def apply_all_jobs(
         score_float = j_score / 100.0 if j_score > 1.0 else j_score
 
         if app_record:
-            app_record.status = "applied"
-            app_record.candidate_name = clean_name
+            setattr(app_record, "status", "applied")
+            setattr(app_record, "candidate_name", clean_name)
             if clean_phone:
-                app_record.candidate_phone = clean_phone
+                setattr(app_record, "candidate_phone", clean_phone)
             if resume_name:
-                app_record.resume_filename = resume_name
-                app_record.resume_url = f"/api/recruiter/files/{resume_name}"
-            app_record.match_score = score_float
+                setattr(app_record, "resume_filename", resume_name)
+                setattr(app_record, "resume_url", f"/api/recruiter/files/{resume_name}")
+            setattr(app_record, "match_score", score_float)
             db.commit()
             db.refresh(app_record)
         else:
@@ -492,8 +492,8 @@ async def apply_all_jobs(
             job_title=j_title,
             company_name=j_company,
             application_id=app_record.id if app_record else None,
-            authorizer_email=auth_email,
-            authorizer_name=auth_name,
+            authorizer_email=str(auth_email) if auth_email else None,
+            authorizer_name=str(auth_name) if auth_name else None,
             location=j_location,
             experience=clean_exp or "Verified from Resume",
             match_score=f"{int(j_score)}% Match" if j_score else "Verified Fit",
@@ -503,15 +503,15 @@ async def apply_all_jobs(
         if email_sent:
             emails_sent_count += 1
             if app_record:
-                app_record.email_status = "Sent"
-                app_record.email_message_id = email_msg_id
-                app_record.email_sent_at = datetime.now(timezone.utc)
+                setattr(app_record, "email_status", "Sent")
+                setattr(app_record, "email_message_id", email_msg_id or "")
+                setattr(app_record, "email_sent_at", datetime.now(timezone.utc))
                 db.commit()
             _logger.info("[ATS Apply] Sent personalized thank-you email to %s for %s at %s", clean_email, j_title, j_company)
         else:
             if app_record:
-                app_record.email_status = "Failed"
-                app_record.email_error = email_err
+                setattr(app_record, "email_status", "Failed")
+                setattr(app_record, "email_error", email_err or "Unknown error")
                 db.commit()
             _logger.warning("[ATS Apply] Failed to send email to %s: %s", clean_email, email_err)
 
@@ -762,11 +762,11 @@ async def parse_resume(
 
                 # Update candidate user record
                 if all_skills:
-                    current_user.default_skills = all_skills
+                    setattr(current_user, "default_skills", all_skills)
                 if analysis.get("candidate_name") and not current_user.full_name:
-                    current_user.full_name = analysis.get("candidate_name")
+                    setattr(current_user, "full_name", analysis.get("candidate_name"))
                 if analysis.get("phone") and not current_user.phone:
-                    current_user.phone = analysis.get("phone")
+                    setattr(current_user, "phone", analysis.get("phone"))
 
                 db.commit()
                 db.refresh(new_resume)
@@ -873,11 +873,12 @@ async def optimize_resume(
         if not resume:
             raise HTTPException(status_code=403, detail="Resume record not found or access denied.")
         resume_text = resume.raw_text or ""
-        if not resume_text and resume.file_path and os.path.exists(resume.file_path):
-            if resume.file_path.endswith(".pdf"):
-                resume_text = extract_text_from_pdf(resume.file_path)
-            elif resume.file_path.endswith(".docx"):
-                resume_text = extract_text_from_docx(resume.file_path)
+        r_path = str(resume.file_path) if resume.file_path else None
+        if not resume_text and r_path and os.path.exists(r_path):
+            if r_path.endswith(".pdf"):
+                resume_text = extract_text_from_pdf(r_path)
+            elif r_path.endswith(".docx"):
+                resume_text = extract_text_from_docx(r_path)
 
     if not resume_text:
         # Check candidate's latest active resume in DB
@@ -897,11 +898,12 @@ async def optimize_resume(
 
         if latest_resume:
             resume_text = latest_resume.raw_text or ""
-            if not resume_text and latest_resume.file_path and os.path.exists(latest_resume.file_path):
-                if latest_resume.file_path.endswith(".pdf"):
-                    resume_text = extract_text_from_pdf(latest_resume.file_path)
-                elif latest_resume.file_path.endswith(".docx"):
-                    resume_text = extract_text_from_docx(latest_resume.file_path)
+            lr_path = str(latest_resume.file_path) if latest_resume.file_path else None
+            if not resume_text and lr_path and os.path.exists(lr_path):
+                if lr_path.endswith(".pdf"):
+                    resume_text = extract_text_from_pdf(lr_path)
+                elif lr_path.endswith(".docx"):
+                    resume_text = extract_text_from_docx(lr_path)
 
     if not resume_text and body.custom_resume_text:
         resume_text = body.custom_resume_text.strip()
@@ -915,11 +917,11 @@ async def optimize_resume(
     # 3. Execute Gemini Resume Optimization
     gemini_service = get_gemini_service()
     result = gemini_service.optimize_resume_for_job(
-        resume_text=resume_text,
-        job_title=job.title,
-        job_company=job.company_name or "Partner Organization",
-        job_description=job.description or "",
-        job_skills=job.skills or ""
+        resume_text=str(resume_text),
+        job_title=str(job.title),
+        job_company=str(job.company_name or "Partner Organization"),
+        job_description=str(job.description or ""),
+        job_skills=str(job.skills or "")
     )
 
     return result
@@ -956,13 +958,14 @@ def get_current_ats_profile(
         prof_skills = skills_obj.get("professional", [])
         domain_skills = skills_obj.get("domain", [])
     else:
-        tech_skills = latest_resume.skills or []
+        tech_skills = list(latest_resume.skills) if isinstance(latest_resume.skills, list) else []
         prof_skills = []
         domain_skills = []
 
-    all_skills = list(dict.fromkeys(tech_skills + prof_skills + domain_skills))
+    combined_raw = list(tech_skills) + list(prof_skills) + list(domain_skills)
+    all_skills: list[str] = [str(s) for s in dict.fromkeys(combined_raw) if s]
     if not all_skills and latest_resume.skills:
-        all_skills = latest_resume.skills
+        all_skills = [str(s) for s in latest_resume.skills] if isinstance(latest_resume.skills, list) else [str(latest_resume.skills)]
 
     # Match real approved jobs
     platform_jobs = []
@@ -986,8 +989,8 @@ def get_current_ats_profile(
     matched_jobs = gemini_svc.match_candidate_against_jobs(
         candidate_skills=all_skills,
         jobs=platform_jobs,
-        candidate_experience=parsed.get("total_experience") or f"{latest_resume.years_of_experience or 1}+ years",
-        resume_text=latest_resume.raw_text or ""
+        candidate_experience=str(parsed.get("total_experience") or f"{latest_resume.years_of_experience or 1}+ years"),
+        resume_text=str(latest_resume.raw_text or "")
     )
 
     return {

@@ -1191,7 +1191,7 @@ async def apply_to_job(
             candidate_name=str(clean_name),
             candidate_email=str(clean_email),
             candidate_phone=candidate_phone or "",
-            resume_url=resume_url,
+            resume_url=str(resume_url) if resume_url else None,
         )
     except Exception as exc:
         import logging as _log

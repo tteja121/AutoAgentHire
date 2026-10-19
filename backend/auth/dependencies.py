@@ -4,7 +4,7 @@ Provides ``get_current_user`` which extracts and validates the JWT
 from the ``Authorization: Bearer <token>`` header.
 """
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import JWTError
@@ -21,19 +21,28 @@ oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error
 
 def get_current_user_optional(
     token: str | None = Depends(oauth2_scheme_optional),
+    request: Request = None,  # type: ignore
     db: Session = Depends(get_db),
 ) -> User | None:
     """Return the User if valid Bearer token provided; None otherwise."""
-    if not token:
+    eff_token = token
+    if not eff_token and request is not None:
+        eff_token = (
+            request.query_params.get("token")
+            or request.cookies.get("authToken")
+            or request.cookies.get("token")
+        )
+    if not eff_token:
         return None
     try:
-        return get_current_user(token=token, db=db)
+        return get_current_user(token=eff_token, request=request, db=db)
     except Exception:
         return None
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    token: str | None = Depends(oauth2_scheme_optional),
+    request: Request = None,  # type: ignore
     db: Session = Depends(get_db),
 ) -> User:
     """Decode the JWT and return the associated ``User`` row.
@@ -49,7 +58,18 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    clean_token = token.strip()
+    eff_token = token
+    if not eff_token and request is not None:
+        eff_token = (
+            request.query_params.get("token")
+            or request.cookies.get("authToken")
+            or request.cookies.get("token")
+        )
+
+    if not eff_token:
+        raise credentials_exception
+
+    clean_token = eff_token.strip()
     if clean_token.startswith("Bearer "):
         clean_token = clean_token[7:].strip()
     if clean_token.startswith('"') and clean_token.endswith('"'):

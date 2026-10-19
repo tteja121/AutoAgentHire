@@ -73,7 +73,7 @@ def decode_access_token(token: str, verify_exp: bool = True) -> Dict[str, Any]:
     if clean_token.startswith('"') and clean_token.endswith('"'):
         clean_token = clean_token[1:-1].strip()
 
-    options = {}
+    options: Dict[str, Any] = {"leeway": 300}
     if not verify_exp:
         options["verify_exp"] = False
     return jwt.decode(clean_token, SECRET_KEY, algorithms=[ALGORITHM], options=options)

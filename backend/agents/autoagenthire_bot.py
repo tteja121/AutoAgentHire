@@ -444,11 +444,6 @@ class AutoAgentHireBot:
             print(f"❌ Login error: {str(e)}")
             self.errors.append(f"Login failed: {str(e)}")
             return False
-            
-        except Exception as e:
-            print(f"❌ Login error: {str(e)}")
-            self.errors.append(f"Login failed: {str(e)}")
-            return False
     
     async def search_jobs(self, keyword: str, location: str) -> None:
         """Search for jobs with Easy Apply filter - ALWAYS uses direct URL method"""
@@ -2125,7 +2120,8 @@ Keep it concise, professional, and express genuine interest. Do not include plac
                     temperature=0.7
                 )
                 
-                answer = response.choices[0].message.content.strip()
+                raw_content = response.choices[0].message.content or ""
+                answer = raw_content.strip()
                 if len(answer) > 500:
                     answer = answer[:497] + "..."
                 
@@ -2548,11 +2544,13 @@ Provide a professional 2-3 sentence answer:"""
                             'el => el.closest(".fb-dash-form-element, .jobs-easy-apply-form-section__grouping, fieldset")'
                         )
                         if parent_section:
-                            label_elem = await parent_section.as_element().query_selector(
-                                'label, .fb-dash-form-element__label, legend, span.t-bold'
-                            )
-                            if label_elem:
-                                label_text = (await label_elem.text_content() or '').lower().strip()
+                            parent_el = parent_section.as_element()
+                            if parent_el:
+                                label_elem = await parent_el.query_selector(
+                                    'label, .fb-dash-form-element__label, legend, span.t-bold'
+                                )
+                                if label_elem:
+                                    label_text = (await label_elem.text_content() or '').lower().strip()
                     except:
                         pass
                     

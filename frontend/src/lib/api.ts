@@ -115,7 +115,7 @@ export const apiClient = {
 // Request interceptor – attach auth token
 apiClient._axios.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('authToken');
+    const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   },
