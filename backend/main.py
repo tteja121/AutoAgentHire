@@ -160,7 +160,15 @@ cors_params = {
     "allow_credentials": True,
     "allow_methods": ["*"],
     "allow_headers": ["*"],
-    "allow_origin_regex": r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://.*\.vercel\.app$",
+    "allow_origin_regex": (
+        r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+        r"|^https://.*\.vercel\.app$"
+        r"|^https://.*\.lovable\.app$"
+        r"|^https://.*\.lovableproject\.com$"
+        r"|^https://.*\.lovable\.dev$"
+        r"|^https://.*\.onrender\.com$"
+        r"|^https://.*\.netlify\.app$"
+    ),
 }
 
 app.add_middleware(

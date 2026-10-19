@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { applyProfileFromResume, getCandidateProfile } from '@/utils/profileSync';
 import { applicationService } from '@/services/applicationService';
+import { API_BASE_URL, apiClient } from '@/lib/api';
 
 export interface MatchedJob {
   id: string;
@@ -85,8 +86,6 @@ export interface ResumeOptimizationData {
   formatting_recommendations: string[];
   tailored_professional_summary: string;
 }
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '';
 
 type JobFilterTap = 'all' | '90plus' | '80to89' | 'under80' | 'applied';
 
@@ -165,36 +164,44 @@ export default function JobAutomation() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const token = localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token') || '';
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token') || '';
 
-      const response = await fetch(`${API_BASE_URL}/api/ats/parse-resume`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      });
-
-      if (!response.ok) {
-        let errMessage = 'Failed to analyze resume';
-        try {
-          const errData = await response.json();
-          if (typeof errData.detail === 'string') {
-            errMessage = errData.detail;
-          } else if (errData.detail && typeof errData.detail === 'object') {
-            errMessage = errData.detail.message || errData.detail.error || errMessage;
-          } else if (errData.message) {
-            errMessage = errData.message;
-          }
-        } catch {
-          // ignore json parsing errors
+      let data: any;
+      try {
+        const res = await apiClient.postFormData('/api/ats/parse-resume', formData);
+        data = res.data;
+      } catch (clientErr: any) {
+        const headers: Record<string, string> = {};
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
         }
-        throw new Error(errMessage);
-      }
 
-      const data = await response.json();
+        const endpoint = API_BASE_URL ? `${API_BASE_URL}/api/ats/parse-resume` : '/api/ats/parse-resume';
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: formData,
+        });
+
+        if (!response.ok) {
+          let errMessage = 'Failed to analyze resume';
+          try {
+            const errData = await response.json();
+            if (typeof errData.detail === 'string') {
+              errMessage = errData.detail;
+            } else if (errData.detail && typeof errData.detail === 'object') {
+              errMessage = errData.detail.message || errData.detail.error || errMessage;
+            } else if (errData.message) {
+              errMessage = errData.message;
+            }
+          } catch {
+            // ignore json parsing errors
+          }
+          throw new Error(errMessage);
+        }
+
+        data = await response.json();
+      }
 
       const skillsObj = data.skills || {};
       const techSkills: string[] = skillsObj.technical || [];
@@ -295,33 +302,43 @@ export default function JobAutomation() {
     setCopiedSummary(false);
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token') || '';
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const res = await fetch(`${API_BASE_URL}/api/ats/optimize-resume`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
+      let data: any;
+      try {
+        const res = await apiClient.post('/api/ats/optimize-resume', {
           job_id: job.id,
           resume_id: profile?.resume_id,
-        }),
-      });
+        });
+        data = res.data;
+      } catch (clientErr: any) {
+        const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token') || '';
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
 
-      if (!res.ok) {
-        let err = 'Optimization failed';
-        try {
-          const d = await res.json();
-          err = d.detail || err;
-        } catch {}
-        throw new Error(err);
+        const endpoint = API_BASE_URL ? `${API_BASE_URL}/api/ats/optimize-resume` : '/api/ats/optimize-resume';
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            job_id: job.id,
+            resume_id: profile?.resume_id,
+          }),
+        });
+
+        if (!res.ok) {
+          let err = 'Optimization failed';
+          try {
+            const d = await res.json();
+            err = d.detail || err;
+          } catch {}
+          throw new Error(err);
+        }
+
+        data = await res.json();
       }
-
-      const data = await res.json();
       setOptimizationData(data);
     } catch (err: any) {
       console.error('Optimization error:', err);

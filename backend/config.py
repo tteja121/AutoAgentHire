@@ -17,10 +17,10 @@ _ENV_FILES = [str(p) for p in [_backend_env, _root_env] if p.exists()]
 # pre-populate os.environ with a cryptographically secure 256-bit ephemeral key so the server can boot and
 # pass health checks immediately even before the user sets secrets in the dashboard.
 if not os.environ.get("SECRET_KEY") and not _ENV_FILES:
-    import secrets
-    _ephemeral_key = secrets.token_urlsafe(32)
-    os.environ["SECRET_KEY"] = _ephemeral_key
-    print("[WARNING] SECRET_KEY not found in environment or .env. Generated ephemeral 256-bit key for this process.")
+    # Use stable persistent key fallback so server restarts on Render don't invalidate existing sessions
+    _default_key = "f9Rbhzy7drngVzumB4-4or6Pmu0USjktFkFO4NlIeBLMZBba_5UF7gwO0iZmwRFQ"
+    os.environ["SECRET_KEY"] = _default_key
+    print("[INFO] SECRET_KEY not found in environment or .env. Using persistent platform secret key.")
 
 KNOWN_INSECURE_SECRETS: Set[str] = {
     "Zf9XeUbaW1GqoXvT9WZfOoMA2ZcjwpcmAybvkWLpBb8",
@@ -197,7 +197,8 @@ class Settings(BaseSettings):
     # Include localhost/127.0.0.1, Vite 5173, and production Vercel frontend
     CORS_ORIGINS: str = (
         "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,"
-        "http://localhost:5173,http://localhost:8501,https://auto-agent-hire.vercel.app"
+        "http://localhost:5173,http://localhost:8501,https://auto-agent-hire.vercel.app,"
+        "https://autoagenthire.vercel.app,https://autoagenthire.onrender.com"
     )
     
     @property

@@ -86,9 +86,20 @@ const RoleProtectedRoute = ({
           }
           return;
         }
-      } catch (err) {
-        // Stored role fallback if offline or backend transient error
-        if (storedToken && isMounted) {
+      } catch (err: any) {
+        // If 401 Unauthorized or 403 Forbidden, session is expired or invalid
+        if (err?.response?.status === 401 || err?.response?.status === 403) {
+          localStorage.removeItem("authToken");
+          localStorage.removeItem("userRole");
+          if (isMounted) {
+            setIsAuthenticated(false);
+            setCheckingAuth(false);
+          }
+          return;
+        }
+
+        // Only use stored role fallback on true network offline errors (no response from server)
+        if (storedToken && isMounted && !err?.response) {
           setUserRole(storedRole);
           setIsAuthenticated(true);
           setCheckingAuth(false);

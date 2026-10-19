@@ -384,6 +384,17 @@ export default function AuthorizerPortal() {
       loadRecruiterRequests();
       loadUsers();
     } catch (err: any) {
+      if (err?.response?.status === 401) {
+        toast({
+          title: "Session Expired",
+          description: "Your Authorizer session has expired. Please log in again.",
+          variant: "destructive",
+        });
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("userRole");
+        navigate("/login");
+        return;
+      }
       const detail = err?.response?.data?.detail || err?.message || "Failed to create recruiter account";
       toast({
         title: "Recruiter Creation Failed",
