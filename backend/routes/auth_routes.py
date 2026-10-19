@@ -213,11 +213,11 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
                     detail="An account with this email already exists. Please log in.",
                 )
             # Existing unverified registration: refresh password and OTP
-            existing.hashed_password = hashed
+            setattr(existing, "hashed_password", hashed)
             if clean_name:
-                existing.full_name = clean_name
-            existing.email_verification_code = otp_code
-            existing.email_verification_expires_at = expires_at
+                setattr(existing, "full_name", clean_name)
+            setattr(existing, "email_verification_code", otp_code)
+            setattr(existing, "email_verification_expires_at", expires_at)
             db.commit()
         else:
             try:
@@ -339,15 +339,15 @@ def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No registration found for this email.")
 
     if getattr(user, "is_verified", False):
-        access_token = create_access_token(data={"sub": user.email, "role": user.role, "id": user.id})
+        access_token = create_access_token(data={"sub": str(getattr(user, "email", "")), "role": str(getattr(user, "role", "candidate")), "id": getattr(user, "id", None)})
         return LoginResponse(
             access_token=access_token,
             token_type="bearer",
-            role=user.role,
-            email=user.email,
-            full_name=user.full_name,
-            custom_user_id=user.custom_user_id,
-            approval_status=user.approval_status or "approved",
+            role=str(getattr(user, "role", "candidate")),
+            email=getattr(user, "email", None),
+            full_name=getattr(user, "full_name", None),
+            custom_user_id=getattr(user, "custom_user_id", None),
+            approval_status=str(getattr(user, "approval_status", "approved")),
         )
 
     saved_code = getattr(user, "email_verification_code", None)
@@ -369,22 +369,22 @@ def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
             detail="Invalid 6-digit verification code. Please check your email and try again.",
         )
 
-    user.is_verified = True
-    user.email_verified_at = now
-    user.email_verification_code = None
-    user.email_verification_expires_at = None
-    user.is_active = True
-    user.approval_status = "approved"
-    user.last_login = now
+    setattr(user, "is_verified", True)
+    setattr(user, "email_verified_at", now)
+    setattr(user, "email_verification_code", None)
+    setattr(user, "email_verification_expires_at", None)
+    setattr(user, "is_active", True)
+    setattr(user, "approval_status", "approved")
+    setattr(user, "last_login", now)
 
     try:
         login_log = AuditLog(
-            user_id=user.id,
-            performed_by_email=user.email,
+            user_id=getattr(user, "id", None),
+            performed_by_email=str(getattr(user, "email", "")),
             action="login_success",
             target_type="user",
-            target_id=str(user.id),
-            details={"role": user.role, "login_method": "otp_verification"},
+            target_id=str(getattr(user, "id", "")),
+            details={"role": getattr(user, "role", "candidate"), "login_method": "otp_verification"},
         )
         db.add(login_log)
     except Exception:
@@ -393,14 +393,14 @@ def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    access_token = create_access_token(data={"sub": user.email, "role": user.role, "id": user.id})
+    access_token = create_access_token(data={"sub": str(getattr(user, "email", "")), "role": str(getattr(user, "role", "candidate")), "id": getattr(user, "id", None)})
     return LoginResponse(
         access_token=access_token,
         token_type="bearer",
-        role=user.role,
-        email=user.email,
-        full_name=user.full_name,
-        custom_user_id=user.custom_user_id,
+        role=str(getattr(user, "role", "candidate")),
+        email=getattr(user, "email", None),
+        full_name=getattr(user, "full_name", None),
+        custom_user_id=getattr(user, "custom_user_id", None),
         approval_status="approved",
     )
 
@@ -424,12 +424,12 @@ def resend_signup_otp(body: ResendOtpRequest, db: Session = Depends(get_db)):
     import random
     otp_code = f"{random.randint(100000, 999999)}"
     now = datetime.now(timezone.utc)
-    user.email_verification_code = otp_code
-    user.email_verification_expires_at = now + timedelta(minutes=15)
+    setattr(user, "email_verification_code", otp_code)
+    setattr(user, "email_verification_expires_at", now + timedelta(minutes=15))
     db.commit()
 
     from backend.services.email_service import send_signup_verification_code
-    email_sent = send_signup_verification_code(clean_email, user.full_name, otp_code)
+    email_sent = send_signup_verification_code(clean_email, getattr(user, "full_name", None), otp_code)
     import logging as _logging
     _logging.getLogger(__name__).info("Resent verification code dispatched to %s (sent=%s)", clean_email, email_sent)
 
@@ -609,7 +609,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
     # Update last_login timestamp and write audit log
     try:
-        user.last_login = datetime.now(timezone.utc)
+        setattr(user, "last_login", datetime.now(timezone.utc))
         login_log = AuditLog(
             user_id=user.id,
             performed_by_email=user.email,
@@ -751,7 +751,7 @@ async def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
     # 3. Update last_login and record audit log
     user_role = getattr(user, "role", "candidate") or "candidate"
     try:
-        user.last_login = datetime.now(timezone.utc)
+        setattr(user, "last_login", datetime.now(timezone.utc))
         login_log = AuditLog(
             user_id=user.id,
             performed_by_email=user.email,
@@ -840,11 +840,11 @@ async def change_password(
     try:
         audit = AuditLog(
             action="CHANGE_PASSWORD",
-            user_id=int(current_user.id),
-            performed_by_email=str(current_user.email),
+            user_id=getattr(current_user, "id", None),
+            performed_by_email=str(getattr(current_user, "email", "")),
             target_type="user",
-            target_id=str(current_user.id),
-            details=f"User {current_user.email} successfully updated their password."
+            target_id=str(getattr(current_user, "id", "")),
+            details=f"User {getattr(current_user, 'email', '')} successfully updated their password."
         )
         db.add(audit)
         db.commit()

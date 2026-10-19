@@ -49,8 +49,14 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    clean_token = token.strip()
+    if clean_token.startswith("Bearer "):
+        clean_token = clean_token[7:].strip()
+    if clean_token.startswith('"') and clean_token.endswith('"'):
+        clean_token = clean_token[1:-1].strip()
+
     try:
-        payload = decode_access_token(token)
+        payload = decode_access_token(clean_token)
         email: str | None = payload.get("sub")
         if not email:
             raise credentials_exception
@@ -62,9 +68,19 @@ def get_current_user(
 
     user = UserRepository.get_by_email(db, email=email)
     if user is None:
+        from sqlalchemy import func
+        user = db.query(User).filter(func.lower(User.email) == email.lower()).first()
+
+    if user is None and payload.get("id"):
+        try:
+            user = UserRepository.get_by_id(db, user_id=int(payload["id"]))
+        except (ValueError, TypeError):
+            user = None
+
+    if user is None:
         raise credentials_exception
 
-    if not user.is_active:  # type: ignore
+    if user.is_active is False:
         raise credentials_exception
 
     return user

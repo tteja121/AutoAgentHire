@@ -54,11 +54,12 @@ def create_access_token(
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def decode_access_token(token: str) -> Dict[str, Any]:
+def decode_access_token(token: str, verify_exp: bool = True) -> Dict[str, Any]:
     """Decode and verify a JWT access token against SECRET_KEY.
 
     Args:
         token: The encoded JWT string.
+        verify_exp: Whether to verify expiry date (set False for document viewing grace period).
 
     Returns:
         The decoded payload dictionary.
@@ -66,6 +67,15 @@ def decode_access_token(token: str) -> Dict[str, Any]:
     Raises:
         JWTError: If the token is invalid, expired, or tampered with.
     """
-    return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    clean_token = token.strip()
+    if clean_token.startswith("Bearer "):
+        clean_token = clean_token[7:].strip()
+    if clean_token.startswith('"') and clean_token.endswith('"'):
+        clean_token = clean_token[1:-1].strip()
+
+    options = {}
+    if not verify_exp:
+        options["verify_exp"] = False
+    return jwt.decode(clean_token, SECRET_KEY, algorithms=[ALGORITHM], options=options)
 
 

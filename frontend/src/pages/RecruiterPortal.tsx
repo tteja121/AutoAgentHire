@@ -476,7 +476,7 @@ export default function RecruiterPortal() {
     } catch (err: any) {
       toast({
         title: "Failed to update",
-        description: err?.message || "Could not update status",
+        description: err?.response?.data?.detail || err?.message || "Could not update status",
         variant: "destructive",
       });
     }

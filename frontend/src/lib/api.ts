@@ -126,18 +126,21 @@ apiClient._axios.interceptors.request.use(
 apiClient._axios.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error) => {
-    // Only clear token if an explicit session check on /auth/me returns 401
     if (error.response?.status === 401) {
       const url = error.config?.url || '';
-      if (url.includes('/auth/me')) {
-        const isAuthPage = typeof window !== 'undefined' && (
-          window.location.pathname === '/login' ||
-          window.location.pathname === '/signup' ||
-          window.location.pathname === '/auth/callback'
-        );
-        if (!isAuthPage) {
-          localStorage.removeItem('authToken');
-          localStorage.removeItem('userRole');
+      const detail = String(error.response?.data?.detail || '');
+      const isAuthPage = typeof window !== 'undefined' && (
+        window.location.pathname === '/login' ||
+        window.location.pathname === '/signup' ||
+        window.location.pathname === '/auth/callback'
+      );
+      if ((url.includes('/auth/me') || detail.includes('validate credentials')) && !isAuthPage) {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('userRole');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('auth:session_expired', {
+            detail: { message: 'Your session has expired. Please sign in again.' }
+          }));
         }
       }
     }
