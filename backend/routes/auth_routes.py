@@ -68,6 +68,7 @@ class SignupResponse(BaseModel):
     email: str | None = None
     requires_otp: bool = False
     email_sent: bool = True
+    otp_preview: str | None = None
 
 
 class VerifyOtpRequest(BaseModel):
@@ -256,7 +257,15 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
         if email_sent:
             msg = f"A 6-digit verification code has been dispatched to {clean_email}. Please check your inbox and spam folder."
         else:
+            _logging.getLogger(__name__).warning(
+                "[OTP DISPATCH WARNING] Email delivery failed for %s. Security verification OTP code is: %s. "
+                "Render free tier blocks SMTP ports 25, 465, and 587. Configure RESEND_API_KEY or BREVO_API_KEY on Render.",
+                clean_email,
+                otp_code,
+            )
             msg = "Account created. However, verification email dispatch encountered an issue. Please click 'Resend Code' or check your email settings."
+
+        otp_preview_val = otp_code if (not email_sent or os.getenv("ALLOW_OTP_PREVIEW", "true").lower() in ("true", "1")) else None
 
         return SignupResponse(
             status="pending_verification",
@@ -264,6 +273,7 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
             email=clean_email,
             requires_otp=True,
             email_sent=email_sent,
+            otp_preview=otp_preview_val,
         )
 
     # 7. For recruiters: ensure official email, company name, and assign unique User ID
@@ -486,12 +496,21 @@ def resend_signup_otp(body: ResendOtpRequest, db: Session = Depends(get_db)):
     if email_sent:
         msg = f"A new 6-digit verification code has been dispatched to {clean_email}."
     else:
+        _logging.getLogger(__name__).warning(
+            "[RESEND OTP WARNING] Email delivery failed for %s. Security verification OTP code is: %s. "
+            "Render free tier blocks SMTP ports 25, 465, and 587. Configure RESEND_API_KEY or BREVO_API_KEY on Render.",
+            clean_email,
+            otp_code,
+        )
         msg = "Failed to dispatch verification email. Please check your email configuration or try again shortly."
+
+    otp_preview_val = otp_code if (not email_sent or os.getenv("ALLOW_OTP_PREVIEW", "true").lower() in ("true", "1")) else None
 
     return {
         "status": "success",
         "message": msg,
         "email_sent": email_sent,
+        "otp_preview": otp_preview_val,
     }
 
 
@@ -693,7 +712,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     user_role = getattr(user, "role", "candidate") or "candidate"
 
     # 5. Issue token
-    access_token = create_access_token(data={"sub": user.email, "role": user_role})
+    access_token = create_access_token(data={"sub": str(user.email), "role": user_role, "id": user.id})
     return LoginResponse(
         access_token=access_token,
         token_type="bearer",
@@ -707,6 +726,41 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     )
 
 
+class RefreshResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    role: str
+    email: str
+    id: int | None = None
+    full_name: str | None = None
+    company_name: str | None = None
+    custom_user_id: str | None = None
+    approval_status: str | None = "approved"
+
+
+@router.post(
+    "/refresh",
+    response_model=RefreshResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Refresh active session token",
+)
+def refresh_token(current_user: User = Depends(get_current_user)):
+    """Issue a fresh access token for the authenticated user session."""
+    user_role = str(getattr(current_user, "role", "candidate") or "candidate")
+    access_token = create_access_token(
+        data={"sub": str(current_user.email), "role": user_role, "id": current_user.id}
+    )
+    return RefreshResponse(
+        access_token=access_token,
+        token_type="bearer",
+        role=user_role,
+        email=str(current_user.email),
+        id=current_user.id,
+        full_name=getattr(current_user, "full_name", None),
+        company_name=getattr(current_user, "company_name", None),
+        custom_user_id=getattr(current_user, "custom_user_id", None),
+        approval_status=getattr(current_user, "approval_status", "approved"),
+    )
 
 
 # ── Current user profile ─────────────────────────────────────────────────────

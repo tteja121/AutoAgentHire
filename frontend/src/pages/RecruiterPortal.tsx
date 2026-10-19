@@ -367,12 +367,7 @@ export default function RecruiterPortal() {
       loadTrackingData();
     } catch (err: any) {
       if (err?.response?.status === 401) {
-        toast({
-          title: "Session Expired",
-          description: "Your session has expired. Please log in again.",
-          variant: "destructive",
-        });
-        navigate("/login");
+        // Centralized session expiry interceptor handles token removal and redirect notice
         return;
       }
       toast({
@@ -483,12 +478,7 @@ export default function RecruiterPortal() {
       }
     } catch (err: any) {
       if (err?.response?.status === 401) {
-        toast({
-          title: "Session Expired",
-          description: "Your session has expired. Please log in again.",
-          variant: "destructive",
-        });
-        navigate("/login");
+        // Centralized session expiry interceptor handles token removal and redirect notice
         return;
       }
       toast({

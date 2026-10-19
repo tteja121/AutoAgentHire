@@ -9,7 +9,9 @@ Validates:
 """
 
 import sys
+import uuid
 from pathlib import Path
+from datetime import timedelta
 import pytest
 from jose import jwt
 from fastapi.testclient import TestClient
@@ -19,6 +21,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from backend.main import app  # noqa: E402
 from backend.auth.jwt import create_access_token  # noqa: E402
+from backend.auth.password import hash_password  # noqa: E402
 from backend.database.connection import get_db_session  # noqa: E402
 from backend.database.models_complete import (  # noqa: E402
     User,
@@ -38,7 +41,7 @@ def setup_recruiter_test_data():
             if not u:
                 u = User(
                     email=email,
-                    hashed_password="pbkdf2_sha256$test_dummy_hash",
+                    hashed_password=hash_password("Password@123"),
                     role=role,
                     full_name=full_name,
                     company_name=company,
@@ -49,6 +52,9 @@ def setup_recruiter_test_data():
                 session.add(u)
                 session.commit()
                 session.refresh(u)
+            else:
+                u.hashed_password = hash_password("Password@123")
+                session.commit()
             return u
 
         recruiter_a = get_or_create(
@@ -292,3 +298,156 @@ def test_delete_job_owner_recruiter_succeeds(setup_recruiter_test_data):
     )
     assert res.status_code == 200
     assert res.json()["job_id"] == job_b_id
+
+
+def test_login_recruiter_success(setup_recruiter_test_data):
+    """Recruiter login returns 200 with access_token and bearer token_type."""
+    res = client.post(
+        "/auth/login",
+        json={
+            "email": "recruiter_auth_a@corp.test",
+            "password": "Password@123",
+            "role": "recruiter",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
+    assert data["role"] == "recruiter"
+    assert data["email"] == "recruiter_auth_a@corp.test"
+
+
+def test_login_invalid_password_returns_401(setup_recruiter_test_data):
+    """Login with wrong password must return 401 Unauthorized."""
+    res = client.post(
+        "/auth/login",
+        json={
+            "email": "recruiter_auth_a@corp.test",
+            "password": "WrongPassword!99",
+            "role": "recruiter",
+        },
+    )
+    assert res.status_code == 401
+    assert "detail" in res.json()
+
+
+def test_put_application_status_expired_token_rejected(setup_recruiter_test_data):
+    """PUT application status with expired token must return 401 with clear expiration message."""
+    recruiter_a = setup_recruiter_test_data["recruiter_a"]
+    app_id = setup_recruiter_test_data["app_a"].id
+    # Create an expired token (expired 10 minutes ago, exceeding 300s leeway)
+    expired_token = create_access_token(
+        data={"sub": recruiter_a.email, "role": "recruiter"},
+        expires_delta=timedelta(minutes=-10),
+    )
+    res = client.put(
+        f"/api/recruiter/applications/{app_id}/status",
+        json={"status": "interview"},
+        headers={"Authorization": f"Bearer {expired_token}"},
+    )
+    assert res.status_code == 401
+    assert "expired" in res.json().get("detail", "").lower()
+
+
+def test_delete_job_expired_token_rejected(setup_recruiter_test_data):
+    """DELETE job with expired token must return 401."""
+    recruiter_a = setup_recruiter_test_data["recruiter_a"]
+    job_id = setup_recruiter_test_data["job_a"].id
+    expired_token = create_access_token(
+        data={"sub": recruiter_a.email, "role": "recruiter"},
+        expires_delta=timedelta(minutes=-10),
+    )
+    res = client.delete(
+        f"/api/recruiter/jobs/{job_id}",
+        headers={"Authorization": f"Bearer {expired_token}"},
+    )
+    assert res.status_code == 401
+    assert "expired" in res.json().get("detail", "").lower()
+
+
+def test_put_application_status_lowercase_bearer_accepted(setup_recruiter_test_data):
+    """Request with lowercase 'bearer <token>' must authenticate correctly."""
+    recruiter_a = setup_recruiter_test_data["recruiter_a"]
+    app_id = setup_recruiter_test_data["app_a"].id
+    token = create_access_token(data={"sub": recruiter_a.email, "role": "recruiter"})
+    res = client.put(
+        f"/api/recruiter/applications/{app_id}/status",
+        json={"status": "reviewing"},
+        headers={"Authorization": f"bearer {token}"},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "reviewing"
+
+
+def test_put_application_status_quoted_token_accepted(setup_recruiter_test_data):
+    """Request with quoted Bearer '<token>' must authenticate correctly."""
+    recruiter_a = setup_recruiter_test_data["recruiter_a"]
+    app_id = setup_recruiter_test_data["app_a"].id
+    token = create_access_token(data={"sub": recruiter_a.email, "role": "recruiter"})
+    res = client.put(
+        f"/api/recruiter/applications/{app_id}/status",
+        json={"status": "reviewing"},
+        headers={"Authorization": f'Bearer "{token}"'},
+    )
+    assert res.status_code == 200
+
+
+def test_auth_refresh_endpoint_success(setup_recruiter_test_data):
+    """POST /auth/refresh with valid token issues a fresh token."""
+    recruiter_a = setup_recruiter_test_data["recruiter_a"]
+    token = create_access_token(data={"sub": recruiter_a.email, "role": "recruiter"})
+    res = client.post(
+        "/auth/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "access_token" in data
+    assert data["email"] == recruiter_a.email
+    assert data["role"] == "recruiter"
+
+
+def test_auth_refresh_unauthenticated_rejected():
+    """POST /auth/refresh without token must return 401 Unauthorized."""
+    res = client.post("/auth/refresh")
+    assert res.status_code == 401
+
+
+def test_client_signup_otp_and_verification_flow():
+    """Client signup returns requires_otp=True and allows verification via OTP code."""
+    test_client_email = f"client_otp_{uuid.uuid4().hex[:8]}@example.com"
+    signup_res = client.post(
+        "/auth/signup",
+        json={
+            "email": test_client_email,
+            "password": "Password123!@",
+            "name": "OTP Test Client",
+            "role": "candidate",
+        },
+    )
+    assert signup_res.status_code in (200, 201)
+    data = signup_res.json()
+    assert data["requires_otp"] is True
+    assert "otp_preview" in data
+    otp_code = data.get("otp_preview")
+    assert otp_code is not None and len(otp_code) == 6
+
+    # Verify with wrong OTP
+    wrong_res = client.post(
+        "/auth/verify-otp",
+        json={"email": test_client_email, "code": "000000"},
+    )
+    assert wrong_res.status_code == 400
+    assert "Invalid" in wrong_res.json().get("detail", "")
+
+    # Verify with correct OTP
+    verify_res = client.post(
+        "/auth/verify-otp",
+        json={"email": test_client_email, "code": otp_code},
+    )
+    assert verify_res.status_code == 200
+    verify_data = verify_res.json()
+    assert "access_token" in verify_data
+    assert verify_data["email"] == test_client_email
+

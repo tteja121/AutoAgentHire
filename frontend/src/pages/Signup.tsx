@@ -46,6 +46,7 @@ const Signup = () => {
   const [resendCooldown, setResendCooldown] = useState(60);
   const [isResending, setIsResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState<string | null>(null);
+  const [otpPreview, setOtpPreview] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -179,8 +180,11 @@ const Signup = () => {
         setIsOtpStep(true);
         setOtpError(null);
         setResendCooldown(60);
+        if (res?.otp_preview) {
+          setOtpPreview(res.otp_preview);
+        }
         if (res.email_sent === false) {
-          setOtpError("Account created, but verification email could not be delivered immediately. Please click 'Resend Code' or check your email settings.");
+          setOtpError("Account created, but verification email could not be delivered immediately. Please click 'Resend Code' or verify your email provider.");
           setResendSuccess(null);
         } else {
           setResendSuccess("A 6-digit verification code has been dispatched to your email address. Please check your inbox and spam folder.");
@@ -224,6 +228,9 @@ const Signup = () => {
 
     try {
       const res = await authService.resendSignupOtp(formData.email);
+      if (res?.otp_preview) {
+        setOtpPreview(res.otp_preview);
+      }
       if (res?.email_sent === false) {
         setOtpError("Email delivery encountered an issue. Please click 'Resend Code' or verify your email provider.");
       } else {
@@ -324,6 +331,27 @@ const Signup = () => {
                   <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-sm flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-400" />
                     <div>{resendSuccess}</div>
+                  </div>
+                )}
+
+                {otpPreview && (
+                  <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-200 text-xs flex flex-col gap-1.5 text-left">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-blue-300">Security Verification Code:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOtpCode(otpPreview);
+                          setOtpError(null);
+                        }}
+                        className="px-2 py-0.5 rounded bg-primary/20 hover:bg-primary/30 text-primary font-mono font-bold text-xs transition-colors"
+                      >
+                        Auto-fill: {otpPreview}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Use code <strong className="font-mono text-foreground">{otpPreview}</strong> to complete account activation.
+                    </p>
                   </div>
                 )}
 

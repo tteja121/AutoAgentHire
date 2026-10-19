@@ -11,6 +11,10 @@
       "destination": "https://autoagenthire.onrender.com/auth/:path*"
     },
     {
+      "source": "/uploads/:path*",
+      "destination": "https://autoagenthire.onrender.com/uploads/:path*"
+    },
+    {
       "source": "/health",
       "destination": "https://autoagenthire.onrender.com/health"
     },

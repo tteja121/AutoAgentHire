@@ -211,12 +211,6 @@ export default function AuthorizerPortal() {
       setUsersList(resp.data || []);
     } catch (err: any) {
       if (err?.response?.status === 401) {
-        toast({
-          title: "Session Expired",
-          description: "Authorizer session has expired. Please sign in again.",
-          variant: "destructive",
-        });
-        navigate("/login");
         return;
       }
       console.error("Failed to load users for authorizer:", err);
@@ -231,7 +225,6 @@ export default function AuthorizerPortal() {
       setAuditLogs(resp.data || []);
     } catch (err: any) {
       if (err?.response?.status === 401) {
-        navigate("/login");
         return;
       }
       console.error("Failed to load audit logs:", err);
@@ -247,12 +240,6 @@ export default function AuthorizerPortal() {
       setRecruiterRequests(resp.data || []);
     } catch (err: any) {
       if (err?.response?.status === 401) {
-        toast({
-          title: "Session Expired",
-          description: "Authorizer session has expired. Please sign in again.",
-          variant: "destructive",
-        });
-        navigate("/login");
         return;
       }
       console.error("Failed to load recruiter requests:", err);
@@ -410,14 +397,6 @@ export default function AuthorizerPortal() {
       loadUsers();
     } catch (err: any) {
       if (err?.response?.status === 401) {
-        toast({
-          title: "Session Expired",
-          description: "Your Authorizer session has expired. Please log in again.",
-          variant: "destructive",
-        });
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("userRole");
-        navigate("/login");
         return;
       }
       const detail = err?.response?.data?.detail || err?.message || "Failed to create recruiter account";

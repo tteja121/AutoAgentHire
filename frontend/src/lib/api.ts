@@ -115,14 +115,23 @@ export const apiClient = {
 // Request interceptor – attach auth token
 apiClient._axios.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    const rawToken = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token');
+    const token = rawToken?.trim();
+    if (token && token !== 'undefined' && token !== 'null') {
+      config.headers = config.headers || {};
+      config.headers.Authorization = `Bearer ${token}`;
+      if (typeof (config.headers as any).set === 'function') {
+        (config.headers as any).set('Authorization', `Bearer ${token}`);
+      }
+    }
     return config;
   },
   (error) => Promise.reject(error),
 );
 
-// Response interceptor – pass errors to caller without hijacking user navigation
+// Response interceptor – pass errors to caller without hijacking user navigation or triggering loops
+let isHandlingSessionExpiry = false;
+
 apiClient._axios.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error) => {
@@ -134,16 +143,27 @@ apiClient._axios.interceptors.response.use(
         window.location.pathname === '/signup' ||
         window.location.pathname === '/auth/callback'
       );
-      if (!isAuthEndpoint && !isAuthPage) {
+      if (!isAuthEndpoint && !isAuthPage && !isHandlingSessionExpiry) {
+        isHandlingSessionExpiry = true;
         localStorage.removeItem('authToken');
         localStorage.removeItem('token');
         localStorage.removeItem('access_token');
         localStorage.removeItem('userRole');
+
+        const detailMsg = error.response?.data?.detail;
+        const expiryMsg = (typeof detailMsg === 'string' && detailMsg.toLowerCase().includes('expired'))
+          ? 'Your session has expired. Please sign in again.'
+          : 'Your session has expired or is invalid. Please sign in again.';
+
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('auth:session_expired', {
-            detail: { message: 'Your session has expired or is invalid. Please sign in again.' }
+            detail: { message: expiryMsg }
           }));
         }
+
+        setTimeout(() => {
+          isHandlingSessionExpiry = false;
+        }, 1500);
       }
     }
     return Promise.reject(error);

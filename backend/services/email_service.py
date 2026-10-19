@@ -66,11 +66,15 @@ def _send_via_resend(
     reply_to: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[str]]:
     """Internal helper to dispatch email using Resend HTTP API."""
-    if not RESEND_API_KEY:
+    resend_key = os.getenv("RESEND_API_KEY", RESEND_API_KEY).strip()
+    if not resend_key:
         return False, None, "Resend API key is not configured."
 
+    from_email = os.getenv("RESEND_FROM_EMAIL", RESEND_FROM_EMAIL).strip() or "onboarding@resend.dev"
+    from_name = os.getenv("RESEND_FROM_NAME", RESEND_FROM_NAME).strip() or "AutoAgentHire"
+
     try:
-        sender = f"{RESEND_FROM_NAME} <{RESEND_FROM_EMAIL}>"
+        sender = f"{from_name} <{from_email}>"
         payload: Dict[str, Any] = {
             "from": sender,
             "to": [to_email],
@@ -83,11 +87,21 @@ def _send_via_resend(
             payload["reply_to"] = reply_to
 
         headers = {
-            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Authorization": f"Bearer {resend_key}",
             "Content-Type": "application/json",
         }
 
         resp = requests.post("https://api.resend.com/emails", json=payload, headers=headers, timeout=12)
+        
+        # If unverified domain error occurs and sender is not already onboarding@resend.dev, retry with onboarding@resend.dev
+        if resp.status_code in (400, 403) and "resend.dev" not in from_email.lower():
+            err_lower = resp.text.lower()
+            if "domain" in err_lower or "verify" in err_lower or "resend.dev" in err_lower:
+                logger.info("[EmailService] Resend unverified domain detected. Retrying with onboarding@resend.dev...")
+                fallback_sender = f"{from_name} <onboarding@resend.dev>"
+                payload["from"] = fallback_sender
+                resp = requests.post("https://api.resend.com/emails", json=payload, headers=headers, timeout=12)
+
         if resp.status_code in (200, 201):
             data = resp.json()
             message_id = data.get("id") or str(uuid.uuid4())
@@ -95,11 +109,11 @@ def _send_via_resend(
             return True, message_id, None
         else:
             # Sanitize error to avoid leaking credentials
-            err_text = resp.text[:250].replace(RESEND_API_KEY, "[REDACTED]")
+            err_text = resp.text[:250].replace(resend_key, "[REDACTED]")
             logger.warning("[EmailService] Resend API returned status %s: %s", resp.status_code, err_text)
             return False, None, f"Resend delivery error (HTTP {resp.status_code}): {err_text}"
     except Exception as exc:
-        sanitized_err = str(exc).replace(RESEND_API_KEY, "[REDACTED]")
+        sanitized_err = str(exc).replace(resend_key, "[REDACTED]")
         logger.error("[EmailService] Resend exception: %s", sanitized_err)
         return False, None, f"Resend connection failed: {sanitized_err}"
 
@@ -324,9 +338,17 @@ def send_email(
         success, _, err = _send_via_smtp(clean_to, subject, html_content, plain_text)
         if success:
             return True
-        logger.warning("[EmailService] SMTP delivery failed: %s", err)
+        logger.warning(
+            "[EmailService] SMTP delivery failed: %s. Note: Render free tier blocks outbound SMTP ports 25, 465, and 587. "
+            "Configure RESEND_API_KEY or BREVO_API_KEY on Render to send emails via HTTPS.",
+            err,
+        )
 
-    logger.warning("[EmailService] All configured email providers failed for %s", clean_to)
+    logger.warning(
+        "[EmailService] All configured email providers failed for %s. "
+        "To enable production email delivery on Render free tier, set RESEND_API_KEY or BREVO_API_KEY.",
+        clean_to,
+    )
     return False
 
 

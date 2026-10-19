@@ -25,6 +25,10 @@ services:
         value: "true"
       - key: SKIP_PLAYWRIGHT_INSTALL
         value: "1"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "10080"
+      - key: ALLOW_OTP_PREVIEW
+        value: "true"
       - key: SECRET_KEY
         generateValue: true
       # Optional secrets to set in Render Dashboard Environment tab:

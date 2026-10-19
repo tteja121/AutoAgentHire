@@ -68,9 +68,11 @@ def decode_access_token(token: str, verify_exp: bool = True) -> Dict[str, Any]:
         JWTError: If the token is invalid, expired, or tampered with.
     """
     clean_token = token.strip()
-    if clean_token.startswith("Bearer "):
+    if (clean_token.startswith('"') and clean_token.endswith('"')) or (clean_token.startswith("'") and clean_token.endswith("'")):
+        clean_token = clean_token[1:-1].strip()
+    if clean_token.lower().startswith("bearer "):
         clean_token = clean_token[7:].strip()
-    if clean_token.startswith('"') and clean_token.endswith('"'):
+    if (clean_token.startswith('"') and clean_token.endswith('"')) or (clean_token.startswith("'") and clean_token.endswith("'")):
         clean_token = clean_token[1:-1].strip()
 
     options: Dict[str, Any] = {"leeway": 300}

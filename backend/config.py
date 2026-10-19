@@ -262,8 +262,14 @@ except Exception as e:
         API_PORT=int(os.environ.get("PORT", os.environ.get("API_PORT", "8000"))),
         API_RELOAD=False,
         SECRET_KEY=_secret_key,
+        ALGORITHM=os.environ.get("ALGORITHM", "HS256"),
+        ACCESS_TOKEN_EXPIRE_MINUTES=int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "10080")),
+        REFRESH_TOKEN_EXPIRE_DAYS=int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7")),
         DATABASE_URL=os.environ.get("DATABASE_URL", "sqlite:///./data/autoagenthire.db"),
+        MONGODB_URI=os.environ.get("MONGODB_URI", ""),
+        MONGODB_DB_NAME=os.environ.get("MONGODB_DB_NAME", "autoagenthire"),
         OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", ""),
-        CORS_ORIGINS=os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://localhost:8501"),
+        CORS_ORIGINS=os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://localhost:8501,https://auto-agent-hire.vercel.app,https://autoagenthire.vercel.app,https://autoagenthire.onrender.com"),
         ALLOWED_RESUME_EXTENSIONS=os.environ.get("ALLOWED_RESUME_EXTENSIONS", "pdf,docx,txt"),
     )
+
