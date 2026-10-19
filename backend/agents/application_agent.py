@@ -4,6 +4,7 @@ Handles cover letter generation and form filling.
 Enhanced with AI-powered profile matching to auto-apply only to high-match jobs.
 """
 from typing import Dict, Any, Optional
+import os
 import logging
 # from crewai import Agent
 # from backend.agents.tools import CoverLetterTool, FormFillerTool
