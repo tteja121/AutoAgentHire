@@ -33,12 +33,16 @@ WEBSITE_URL = os.getenv("WEBSITE_URL", "https://autoagenthire.com")
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "support@autoagenthire.com")
 
 # Standard SMTP Configuration Defaults
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+DEFAULT_SMTP_USER = "hyrai.auto@gmail.com"
+DEFAULT_SMTP_PASSWORD = "dhxlclfekogrnobw"
+DEFAULT_SMTP_HOST = "smtp.gmail.com"
+
+SMTP_HOST = os.getenv("SMTP_HOST", DEFAULT_SMTP_HOST)
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", os.getenv("SMTP_USER", RESEND_FROM_EMAIL))
-SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", RESEND_FROM_NAME)
+SMTP_USER = os.getenv("SMTP_USER", DEFAULT_SMTP_USER)
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", DEFAULT_SMTP_PASSWORD)
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USER or RESEND_FROM_EMAIL)
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "AutoAgentHire Platform")
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() in ("true", "1", "yes")
 SMTP_ENABLED = os.getenv("SMTP_ENABLED", "true").lower() in ("true", "1", "yes")
 
@@ -816,7 +820,7 @@ def send_candidate_status_update_email(
             f"The hiring team reviewed your verified experience and selected your profile for\n"
             f"the next interview round."
         )
-    elif status_lower in ("interview", "interviewing"):
+    elif status_lower in ("interview", "interviewing", "scheduled"):
         subject = f"Interview Scheduled: {job_name} at {comp_name} — Google Meet Link"
         status_display = "INTERVIEW SCHEDULED"
         headline_msg = (
@@ -830,7 +834,7 @@ def send_candidate_status_update_email(
             f"Your application for the {job_name} position at {comp_name} has moved to the\n"
             f"active REVIEW stage. The recruiting team is currently evaluating your profile."
         )
-    elif status_lower in ("rejected", "reject"):
+    elif status_lower in ("rejected", "reject", "recjected", "declined"):
         subject = f"Update Regarding Your Application for {job_name} at {comp_name}"
         status_display = "APPLICATION STATUS UPDATE"
         headline_msg = (
@@ -839,6 +843,14 @@ def send_candidate_status_update_email(
             f"After careful review of all submissions, we have decided to move forward with other candidates\n"
             f"whose current qualifications more closely match the specific needs of this role at this time.\n\n"
             f"We encourage you to explore other matching positions on AutoAgentHire that align with your skillset."
+        )
+    elif status_lower in ("applied", "applying", "submitted", "received"):
+        subject = f"Application Confirmation: {job_name} at {comp_name}"
+        status_display = "APPLICATION RECEIVED"
+        headline_msg = (
+            f"Thank you for applying for the position of {job_name} at {comp_name} via AutoAgentHire.\n\n"
+            f"Your application and resume have been successfully registered with the hiring team.\n"
+            f"You will receive further updates as the team reviews your profile."
         )
     elif status_lower in ("hired", "offer"):
         subject = f"Congratulations! Offer Extended for {job_name} at {comp_name}"
