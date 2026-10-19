@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { apiClient, API_ENDPOINTS } from "./lib/api";
@@ -144,6 +144,28 @@ const RoleProtectedRoute = ({
   return <>{children}</>;
 };
 
+const SessionExpiredListener = () => {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const handleExpired = (e: any) => {
+      const message = e.detail?.message || "Your session has expired. Please sign in again.";
+      const currentPath = window.location.pathname;
+      if (currentPath === "/login" || currentPath === "/signup" || currentPath.startsWith("/auth/")) {
+        return;
+      }
+      navigate(`/login?message=${encodeURIComponent(message)}`, { replace: true });
+    };
+
+    window.addEventListener("auth:session_expired", handleExpired);
+    return () => {
+      window.removeEventListener("auth:session_expired", handleExpired);
+    };
+  }, [navigate]);
+
+  return null;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -155,6 +177,7 @@ const App = () => (
           v7_relativeSplatPath: true,
         }}
       >
+        <SessionExpiredListener />
         <ErrorBoundary>
           <Suspense fallback={<PageLoading />}>
             <Routes>

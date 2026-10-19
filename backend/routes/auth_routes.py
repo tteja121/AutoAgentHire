@@ -458,7 +458,7 @@ def resolve_user_id(body: ResolveUserIdRequest, db: Session = Depends(get_db)):
         )
     
     # Pre-configured Authorizer account
-    if uid.upper() == "AUTH-001":
+    if uid.upper() in ("AUTH-001", "AUTHOR", "AUTHORIZER", "AUTHOR@AUTO.IN"):
         return ResolveUserIdResponse(
             status="success",
             email="Author@auto.in",
@@ -534,10 +534,18 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     _log = _logging.getLogger(__name__)
 
     # Special check for Authorizer pre-configured credentials
-    is_authorizer = identifier_clean.lower() in ("author@auto.in", "auth-001")
+    is_authorizer = identifier_clean.lower() in (
+        "author@auto.in",
+        "auth-001",
+        "author",
+        "authorizer",
+        "authorizer@auto.in",
+    )
 
     # Look up user by identifier (email, custom_user_id, or uuid)
     user = UserRepository.get_by_identifier(db, identifier_clean)
+    if user is None and is_authorizer:
+        user = UserRepository.get_by_email(db, "Author@auto.in")
 
     # Handle Authorizer or existing user check
     if user is None:
@@ -551,6 +559,8 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
                 role="authorizer",
                 custom_user_id="AUTH-001",
                 approval_status="approved",
+                is_active=True,
+                is_verified=True,
             )
         else:
             raise HTTPException(
@@ -558,12 +568,12 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
                 detail="No account found with this email or User ID. Please create an account first before signing in.",
             )
 
-    if is_authorizer and user is not None and body.password == "Author@123":
-        if not verify_password("Author@123", str(user.hashed_password)):
-            user.hashed_password = hash_password("Author@123")  # type: ignore
-            db.commit()
+    if is_authorizer and user is not None and body.password in ("Author@123", "author@123"):
+        user.hashed_password = hash_password(body.password)  # type: ignore
         user.role = "authorizer"  # type: ignore
         user.approval_status = "approved"  # type: ignore
+        user.is_active = True  # type: ignore
+        user.is_verified = True  # type: ignore
         if not getattr(user, "custom_user_id", None):
             user.custom_user_id = "AUTH-001"  # type: ignore
         db.commit()

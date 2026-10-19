@@ -393,6 +393,9 @@ export default function CandidateJobsPage() {
                         src={job.company_logo_url || "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"}
                         alt={job.company_name}
                         className="w-12 h-12 rounded-xl object-cover bg-muted border border-white/10"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop";
+                        }}
                       />
                       <div>
                         <CardTitle className="text-base font-semibold line-clamp-1">{job.title}</CardTitle>
@@ -510,6 +513,9 @@ export default function CandidateJobsPage() {
                     src={selectedJob.company_logo_url || "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"}
                     alt={selectedJob.company_name}
                     className="w-10 h-10 rounded-xl object-cover bg-muted border border-white/10"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop";
+                    }}
                   />
                   <div>
                     <DialogTitle className="text-lg font-bold">Apply for {selectedJob.title}</DialogTitle>
@@ -693,6 +699,9 @@ export default function CandidateJobsPage() {
                     src={viewingRoleDetailsJob.company_logo_url || "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"}
                     alt={viewingRoleDetailsJob.company_name}
                     className="w-14 h-14 rounded-2xl object-cover bg-muted border border-white/10 shrink-0"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop";
+                    }}
                   />
                   <div className="space-y-1 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">

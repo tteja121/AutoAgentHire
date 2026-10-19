@@ -616,6 +616,9 @@ export const DashboardLayout = () => {
                     src={currentUser.avatar_url}
                     alt={currentUser.full_name || "Profile"}
                     className="w-8 h-8 rounded-lg object-cover border border-primary/30 shadow-md shadow-primary/25"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=128&h=128&fit=crop";
+                    }}
                   />
                 ) : (
                   <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center text-primary-foreground text-xs font-bold shadow-md shadow-primary/25">
@@ -648,6 +651,9 @@ export const DashboardLayout = () => {
                             src={currentUser.avatar_url}
                             alt={currentUser.full_name || "Profile"}
                             className="w-10 h-10 rounded-xl object-cover border border-primary/30 shadow-md"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=128&h=128&fit=crop";
+                            }}
                           />
                         ) : (
                           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center text-primary-foreground font-bold shadow-md">

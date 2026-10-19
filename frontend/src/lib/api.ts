@@ -128,18 +128,20 @@ apiClient._axios.interceptors.response.use(
   async (error) => {
     if (error.response?.status === 401) {
       const url = error.config?.url || '';
-      const detail = String(error.response?.data?.detail || '');
+      const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/signup') || url.includes('/auth/register');
       const isAuthPage = typeof window !== 'undefined' && (
         window.location.pathname === '/login' ||
         window.location.pathname === '/signup' ||
         window.location.pathname === '/auth/callback'
       );
-      if ((url.includes('/auth/me') || detail.includes('validate credentials')) && !isAuthPage) {
+      if (!isAuthEndpoint && !isAuthPage) {
         localStorage.removeItem('authToken');
+        localStorage.removeItem('token');
+        localStorage.removeItem('access_token');
         localStorage.removeItem('userRole');
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('auth:session_expired', {
-            detail: { message: 'Your session has expired. Please sign in again.' }
+            detail: { message: 'Your session has expired or is invalid. Please sign in again.' }
           }));
         }
       }

@@ -44,6 +44,7 @@ const Login = () => {
   // Route query param notices
   const isPendingApprovalNotice = location.search.includes("pending_approval");
   const isRegisteredNotice = location.search.includes("registered=1");
+  const sessionExpiredMessage = new URLSearchParams(location.search).get("message");
 
   // Form input states
   const [identifier, setIdentifier] = useState("");
@@ -224,8 +225,18 @@ const Login = () => {
             </p>
           </div>
 
-          {/* Pending Approval / Registration Notices */}
-          {isPendingApprovalNotice && (
+          {/* Pending Approval / Registration / Session Expired Notices */}
+          {sessionExpiredMessage && (
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="block font-semibold text-amber-200">Session Expired</strong>
+                <span>{sessionExpiredMessage}</span>
+              </div>
+            </div>
+          )}
+
+          {isPendingApprovalNotice && !sessionExpiredMessage && (
             <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-2.5">
               <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div>
@@ -235,7 +246,7 @@ const Login = () => {
             </div>
           )}
 
-          {isRegisteredNotice && !isPendingApprovalNotice && (
+          {isRegisteredNotice && !isPendingApprovalNotice && !sessionExpiredMessage && (
             <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-start gap-2.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <div>
@@ -263,6 +274,47 @@ const Login = () => {
               <div className="leading-relaxed">{error}</div>
             </motion.div>
           )}
+
+          {/* Quick Demo Access Bar */}
+          <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 space-y-2">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span className="font-semibold text-foreground flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-primary" />
+                Demo Credentials / Quick Fill
+              </span>
+              <span>Click to auto-fill</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] px-2.5 bg-background hover:bg-primary/10 border-primary/30"
+                onClick={() => {
+                  setIdentifier("Author@auto.in");
+                  setPassword("Author@123");
+                  setError(null);
+                }}
+              >
+                <ShieldCheck className="w-3 h-3 text-purple-400 mr-1" />
+                Authorizer (AUTH-001)
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] px-2.5 bg-background hover:bg-primary/10 border-primary/30"
+                onClick={() => {
+                  setIdentifier("recruiter_alpha@alphatech.test");
+                  setPassword("Author@123");
+                  setError(null);
+                }}
+              >
+                <Briefcase className="w-3 h-3 text-blue-400 mr-1" />
+                Recruiter Demo
+              </Button>
+            </div>
+          </div>
 
           {/* Single Unified Login Form */}
           <form onSubmit={handleSubmit} className="space-y-4">

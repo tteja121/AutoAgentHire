@@ -211,6 +211,15 @@ export default function AuthorizerPortal() {
       );
       setUsersList(resp.data || []);
     } catch (err: any) {
+      if (err?.response?.status === 401) {
+        toast({
+          title: "Session Expired",
+          description: "Authorizer session has expired. Please sign in again.",
+          variant: "destructive",
+        });
+        navigate("/login");
+        return;
+      }
       console.error("Failed to load users for authorizer:", err);
     } finally {
       setLoadingUsers(false);
@@ -222,6 +231,10 @@ export default function AuthorizerPortal() {
       const resp = await apiClient.get(API_ENDPOINTS.recruiter.authorizerAuditLogs);
       setAuditLogs(resp.data || []);
     } catch (err: any) {
+      if (err?.response?.status === 401) {
+        navigate("/login");
+        return;
+      }
       console.error("Failed to load audit logs:", err);
     }
   };
@@ -234,6 +247,15 @@ export default function AuthorizerPortal() {
       );
       setRecruiterRequests(resp.data || []);
     } catch (err: any) {
+      if (err?.response?.status === 401) {
+        toast({
+          title: "Session Expired",
+          description: "Authorizer session has expired. Please sign in again.",
+          variant: "destructive",
+        });
+        navigate("/login");
+        return;
+      }
       console.error("Failed to load recruiter requests:", err);
     } finally {
       setLoadingRequests(false);
@@ -248,6 +270,10 @@ export default function AuthorizerPortal() {
       );
       setJobs(resp.data || []);
     } catch (err: any) {
+      if (err?.response?.status === 401) {
+        navigate("/login");
+        return;
+      }
       console.error("Failed to load authorizer jobs:", err);
     } finally {
       setLoadingJobs(false);
@@ -1545,6 +1571,9 @@ export default function AuthorizerPortal() {
                                 src={job.company_logo_url || "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"}
                                 alt={job.company_name}
                                 className="w-11 h-11 rounded-xl object-cover bg-muted border border-white/10"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop";
+                                }}
                               />
                               <div>
                                 <CardTitle className="text-base font-semibold">{job.title}</CardTitle>
@@ -1849,6 +1878,9 @@ export default function AuthorizerPortal() {
                       src={currentUser?.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=128&h=128&fit=crop"}
                       alt={currentUser?.full_name || "Authorizer"}
                       className="w-24 h-24 rounded-2xl object-cover border-2 border-purple-500/40 shadow-lg"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=128&h=128&fit=crop";
+                      }}
                     />
                     <button
                       onClick={handleOpenEditProfile}

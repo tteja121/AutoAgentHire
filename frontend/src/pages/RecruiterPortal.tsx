@@ -367,6 +367,15 @@ export default function RecruiterPortal() {
       window.dispatchEvent(new Event("jobPostingsUpdated"));
       loadTrackingData();
     } catch (err: any) {
+      if (err?.response?.status === 401) {
+        toast({
+          title: "Session Expired",
+          description: "Your session has expired. Please log in again.",
+          variant: "destructive",
+        });
+        navigate("/login");
+        return;
+      }
       toast({
         title: "Failed to Delete Job",
         description: err?.response?.data?.detail || err?.message || "Could not delete job vacancy.",
@@ -474,6 +483,15 @@ export default function RecruiterPortal() {
         } : null);
       }
     } catch (err: any) {
+      if (err?.response?.status === 401) {
+        toast({
+          title: "Session Expired",
+          description: "Your session has expired. Please log in again.",
+          variant: "destructive",
+        });
+        navigate("/login");
+        return;
+      }
       toast({
         title: "Failed to update",
         description: err?.response?.data?.detail || err?.message || "Could not update status",
@@ -1007,6 +1025,9 @@ export default function RecruiterPortal() {
                 src={currentUser?.company_logo_url || jobForm.company_logo_url || "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"}
                 alt="Logo"
                 className="w-8 h-8 rounded-lg object-cover bg-card border border-white/10 shrink-0"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop";
+                }}
               />
               <div className="min-w-0">
                 <span className="text-xs font-semibold block text-foreground truncate leading-none">
@@ -1048,6 +1069,9 @@ export default function RecruiterPortal() {
                   src={currentUser?.company_logo_url || jobForm.company_logo_url || "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"}
                   alt="Company Logo"
                   className="w-16 h-16 rounded-2xl object-cover bg-card border border-white/10 shadow-lg"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop";
+                  }}
                 />
                 <div>
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold mb-1 border border-primary/20">
@@ -1808,6 +1832,9 @@ export default function RecruiterPortal() {
                                 src={job.company_logo_url || "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"}
                                 alt={job.company_name}
                                 className="w-10 h-10 rounded-xl object-cover bg-muted border border-white/10"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop";
+                                }}
                               />
                               <div>
                                 <CardTitle className="text-base font-semibold">{job.title}</CardTitle>
@@ -2108,6 +2135,9 @@ export default function RecruiterPortal() {
                       src={currentUser?.avatar_url || currentUser?.company_logo_url || "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"}
                       alt={currentUser?.full_name || "Recruiter"}
                       className="w-24 h-24 rounded-2xl object-cover border-2 border-primary/40 shadow-lg"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop";
+                      }}
                     />
                     <button
                       onClick={handleOpenEditProfile}
