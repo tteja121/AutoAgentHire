@@ -129,7 +129,6 @@ export default function AuthorizerPortal() {
   const [verificationOtpCode, setVerificationOtpCode] = useState("");
   const [isRequestingOtp, setIsRequestingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
-  const [otpDevHint, setOtpDevHint] = useState("");
 
   // Create Recruiter Modal State (Feature 2: 8-character Recruiter ID formula)
   const [createRecruiterOpen, setCreateRecruiterOpen] = useState(false);
@@ -550,9 +549,6 @@ export default function AuthorizerPortal() {
 
       setPendingEmailToVerify(cleanEmail);
       setVerificationOtpCode("");
-      if (resp.data?.dev_code) {
-        setOtpDevHint(resp.data.dev_code);
-      }
       setIsVerifyEmailOpen(true);
       toast({
         title: "Verification Code Sent 📨",
@@ -607,7 +603,6 @@ export default function AuthorizerPortal() {
       setIsEditProfileOpen(false);
       setVerificationOtpCode("");
       setPendingEmailToVerify("");
-      setOtpDevHint("");
 
       toast({
         title: "Official Email Verified & Saved! ✨",
@@ -2735,11 +2730,6 @@ export default function AuthorizerPortal() {
               </p>
             </div>
 
-            {otpDevHint && (
-              <div className="p-2.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs text-center font-mono">
-                Security Sandbox Code: <strong>{otpDevHint}</strong>
-              </div>
-            )}
 
             <div className="pt-1 flex items-center justify-between text-xs">
               <button

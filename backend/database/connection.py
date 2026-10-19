@@ -124,6 +124,8 @@ _COLUMN_MIGRATIONS = [
     ("users", "pending_email",                                "VARCHAR(255)"),
     ("users", "email_verification_code",                     "VARCHAR(20)"),
     ("users", "email_verification_expires_at",                "TIMESTAMP"),
+    ("users", "email_verification_attempts",                  "INTEGER DEFAULT 0"),
+    ("users", "email_verification_last_sent_at",              "TIMESTAMP"),
 ]
 
 

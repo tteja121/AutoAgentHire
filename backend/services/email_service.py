@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", os.getenv("SMTP_FROM_EMAIL", "notifications@autoagenthire.com"))
 RESEND_FROM_NAME = os.getenv("RESEND_FROM_NAME", os.getenv("SMTP_FROM_NAME", "AutoAgentHire"))
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 
 # Website & Support Metadata
 WEBSITE_URL = os.getenv("WEBSITE_URL", "https://autoagenthire.com")
@@ -102,6 +104,94 @@ def _send_via_resend(
         return False, None, f"Resend connection failed: {sanitized_err}"
 
 
+def _send_via_brevo(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    plain_text: Optional[str] = None,
+    reply_to: Optional[str] = None,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """Internal helper to dispatch email using Brevo (Sendinblue) HTTP API."""
+    brevo_key = os.getenv("BREVO_API_KEY", BREVO_API_KEY).strip()
+    if not brevo_key:
+        return False, None, "Brevo API key is not configured."
+    try:
+        from_email = os.getenv("BREVO_FROM_EMAIL", os.getenv("SMTP_FROM_EMAIL", "notifications@autoagenthire.com"))
+        from_name = os.getenv("BREVO_FROM_NAME", os.getenv("SMTP_FROM_NAME", "AutoAgentHire"))
+        payload: Dict[str, Any] = {
+            "sender": {"name": from_name, "email": from_email},
+            "to": [{"email": to_email}],
+            "subject": subject,
+            "htmlContent": html_content,
+        }
+        if plain_text:
+            payload["textContent"] = plain_text
+        if reply_to:
+            payload["replyTo"] = {"email": reply_to}
+        headers = {
+            "api-key": brevo_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        resp = requests.post("https://api.brevo.com/v3/smtp/email", json=payload, headers=headers, timeout=10)
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            message_id = data.get("messageId") or str(uuid.uuid4())
+            logger.info("[EmailService] Brevo email dispatched to %s (ID: %s)", to_email, message_id)
+            return True, message_id, None
+        else:
+            err_text = resp.text[:250].replace(brevo_key, "[REDACTED]")
+            logger.warning("[EmailService] Brevo API error (%s): %s", resp.status_code, err_text)
+            return False, None, f"Brevo HTTP {resp.status_code}: {err_text}"
+    except Exception as exc:
+        sanitized_err = str(exc).replace(brevo_key, "[REDACTED]")
+        logger.error("[EmailService] Brevo exception: %s", sanitized_err)
+        return False, None, sanitized_err
+
+
+def _send_via_sendgrid(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    plain_text: Optional[str] = None,
+    reply_to: Optional[str] = None,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """Internal helper to dispatch email using SendGrid v3 HTTP API."""
+    sg_key = os.getenv("SENDGRID_API_KEY", SENDGRID_API_KEY).strip()
+    if not sg_key:
+        return False, None, "SendGrid API key is not configured."
+    try:
+        from_email = os.getenv("SENDGRID_FROM_EMAIL", os.getenv("SMTP_FROM_EMAIL", "notifications@autoagenthire.com"))
+        from_name = os.getenv("SENDGRID_FROM_NAME", os.getenv("SMTP_FROM_NAME", "AutoAgentHire"))
+        payload: Dict[str, Any] = {
+            "personalizations": [{"to": [{"email": to_email}]}],
+            "from": {"email": from_email, "name": from_name},
+            "subject": subject,
+            "content": [{"type": "text/html", "value": html_content}],
+        }
+        if plain_text:
+            payload["content"].insert(0, {"type": "text/plain", "value": plain_text})
+        if reply_to:
+            payload["reply_to"] = {"email": reply_to}
+        headers = {
+            "Authorization": f"Bearer {sg_key}",
+            "Content-Type": "application/json",
+        }
+        resp = requests.post("https://api.sendgrid.com/v3/mail/send", json=payload, headers=headers, timeout=10)
+        if resp.status_code in (200, 202):
+            message_id = resp.headers.get("X-Message-Id") or str(uuid.uuid4())
+            logger.info("[EmailService] SendGrid email dispatched to %s (ID: %s)", to_email, message_id)
+            return True, message_id, None
+        else:
+            err_text = resp.text[:250].replace(sg_key, "[REDACTED]")
+            logger.warning("[EmailService] SendGrid API error (%s): %s", resp.status_code, err_text)
+            return False, None, f"SendGrid HTTP {resp.status_code}: {err_text}"
+    except Exception as exc:
+        sanitized_err = str(exc).replace(sg_key, "[REDACTED]")
+        logger.error("[EmailService] SendGrid exception: %s", sanitized_err)
+        return False, None, sanitized_err
+
+
 def _send_via_smtp(
     to_email: str,
     subject: str,
@@ -156,9 +246,9 @@ def _send_via_smtp(
         for port in ports_to_try:
             try:
                 if port == 465:
-                    server = smtplib.SMTP_SSL(smtp_host, port, timeout=12)
+                    server = smtplib.SMTP_SSL(smtp_host, port, timeout=8)
                 else:
-                    server = smtplib.SMTP(smtp_host, port, timeout=12)
+                    server = smtplib.SMTP(smtp_host, port, timeout=8)
                     if smtp_use_tls:
                         server.starttls()
 
@@ -197,21 +287,37 @@ def send_email(
     html_content: str,
     plain_text: Optional[str] = None,
 ) -> bool:
-    """Send an HTML/plain-text email via Resend if available, falling back to SMTP."""
+    """Send an HTML/plain-text email via Resend, Brevo, SendGrid, or fallback to SMTP."""
     clean_to = to_email.strip() if to_email else ""
     if not validate_email_address(clean_to):
         logger.warning("[EmailService] Attempted to send email to invalid address: %s", clean_to)
         return False
 
-    # 1. Try Resend if configured
-    resend_key = os.getenv("RESEND_API_KEY", RESEND_API_KEY)
+    # 1. Try Resend HTTP API if configured
+    resend_key = os.getenv("RESEND_API_KEY", RESEND_API_KEY).strip()
     if resend_key:
         success, _, err = _send_via_resend(clean_to, subject, html_content, plain_text)
         if success:
             return True
-        logger.warning("[EmailService] Resend failed (%s), attempting SMTP fallback...", err)
+        logger.warning("[EmailService] Resend failed (%s), attempting other providers...", err)
 
-    # 2. Try SMTP fallback (Gmail App Password, etc. with port 587/465 retry)
+    # 2. Try Brevo HTTP API if configured
+    brevo_key = os.getenv("BREVO_API_KEY", BREVO_API_KEY).strip()
+    if brevo_key:
+        success, _, err = _send_via_brevo(clean_to, subject, html_content, plain_text)
+        if success:
+            return True
+        logger.warning("[EmailService] Brevo failed (%s), attempting other providers...", err)
+
+    # 3. Try SendGrid HTTP API if configured
+    sg_key = os.getenv("SENDGRID_API_KEY", SENDGRID_API_KEY).strip()
+    if sg_key:
+        success, _, err = _send_via_sendgrid(clean_to, subject, html_content, plain_text)
+        if success:
+            return True
+        logger.warning("[EmailService] SendGrid failed (%s), attempting other providers...", err)
+
+    # 4. Try SMTP fallback (Gmail App Password, custom SMTP with port 587/465 retry)
     smtp_user = os.getenv("SMTP_USER", SMTP_USER).strip()
     smtp_password = os.getenv("SMTP_PASSWORD", SMTP_PASSWORD).replace(" ", "").strip()
     if smtp_user and smtp_password:
@@ -717,8 +823,8 @@ def send_email_change_verification_code(
     )
     
     logger.info(
-        "[OTP DISPATCH] 6-digit email update code for %s is: %s (expires in %s min)",
-        to_email, verification_code, expires_in_minutes
+        "[OTP DISPATCH] 6-digit email update code dispatched to %s (expires in %s min)",
+        to_email, expires_in_minutes
     )
     return send_email(to_email, subject, html, plain_text)
 
@@ -796,8 +902,8 @@ def send_signup_verification_code(
     )
 
     logger.info(
-        "[OTP DISPATCH] 6-digit Client signup code for %s is: %s (expires in %s min)",
-        to_email, verification_code, expires_in_minutes
+        "[OTP DISPATCH] 6-digit Client signup code dispatched to %s (expires in %s min)",
+        to_email, expires_in_minutes
     )
     return send_email(to_email, subject, html, plain_text)
 

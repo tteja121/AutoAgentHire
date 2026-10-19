@@ -697,8 +697,8 @@ def request_email_verification(
     )
 
     logger.info(
-        "Email verification code %s generated and dispatched to %s for user %s (role=%s, dispatched=%s)",
-        code, clean_email, current_user.id, current_user.role, sent
+        "Email verification code dispatched to %s for user %s (role=%s, dispatched=%s)",
+        clean_email, current_user.id, current_user.role, sent
     )
 
     return {
@@ -706,7 +706,7 @@ def request_email_verification(
         "message": f"A 6-digit verification code has been dispatched to {clean_email}.",
         "pending_email": clean_email,
         "expires_in_minutes": 15,
-        "dev_code": code,
+        "email_sent": sent,
     }
 
 

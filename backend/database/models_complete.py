@@ -61,6 +61,8 @@ class User(Base):
     pending_email = Column(String(255), nullable=True)
     email_verification_code = Column(String(20), nullable=True)
     email_verification_expires_at = Column(DateTime(timezone=True), nullable=True)
+    email_verification_attempts = Column(Integer, default=0, nullable=True)
+    email_verification_last_sent_at = Column(DateTime(timezone=True), nullable=True)
 
     # Profile Details
     avatar_url = Column(Text)

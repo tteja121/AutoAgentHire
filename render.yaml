@@ -28,7 +28,12 @@ services:
       - key: SECRET_KEY
         generateValue: true
       # Optional secrets to set in Render Dashboard Environment tab:
-      # - key: MONGODB_URI (e.g. mongodb+srv://hyraiauto_db_user:...@cluster0.amc4psk.mongodb.net/autoagenthire?retryWrites=true&w=majority)
+      # - key: RESEND_API_KEY (Recommended: https://resend.com - works over port 443 on Render free tier)
+      # - key: BREVO_API_KEY (Free: https://brevo.com - 300 free emails/day over port 443)
+      # - key: SENDGRID_API_KEY
+      # - key: SMTP_USER (e.g. hyrai.auto@gmail.com)
+      # - key: SMTP_PASSWORD (Google App Password)
+      # - key: MONGODB_URI (e.g. mongodb+srv://...)
       # - key: MONGODB_DB_NAME (autoagenthire)
       # - key: GEMINI_API_KEY
       # - key: GROQ_API_KEY

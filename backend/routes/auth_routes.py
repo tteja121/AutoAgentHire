@@ -53,6 +53,7 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1)
     full_name: str | None = None
+    fullName: str | None = None
     role: str = Field(default="recruiter", description="recruiter or candidate")
     company_name: str | None = None
     company_logo_url: str | None = None
@@ -66,7 +67,6 @@ class SignupResponse(BaseModel):
     status: str = "success"
     email: str | None = None
     requires_otp: bool = False
-    dev_code: str | None = None
     email_sent: bool = True
 
 
@@ -184,7 +184,7 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=phone_err)
 
     clean_email = body.email.strip().lower()
-    clean_name = (body.full_name or "").strip()
+    clean_name = (body.full_name or body.fullName or "").strip()
 
     # Disallow signing up as Authorizer
     user_role = (body.role or "candidate").lower()
@@ -202,8 +202,8 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
         user_role = "candidate"
 
     if user_role == "candidate":
-        import random
-        otp_code = f"{random.randint(100000, 999999)}"
+        import secrets
+        otp_code = f"{secrets.randbelow(900000) + 100000}"
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(minutes=15)
 
@@ -220,6 +220,8 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
                 setattr(existing, "full_name", clean_name)
             setattr(existing, "email_verification_code", otp_code)
             setattr(existing, "email_verification_expires_at", expires_at)
+            setattr(existing, "email_verification_attempts", 0)
+            setattr(existing, "email_verification_last_sent_at", now)
             db.commit()
         else:
             try:
@@ -232,6 +234,8 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
                     is_verified=False,
                     email_verification_code=otp_code,
                     email_verification_expires_at=expires_at,
+                    email_verification_attempts=0,
+                    email_verification_last_sent_at=now,
                     approval_status="approved",
                     phone=body.phone,
                     location=body.location,
@@ -250,16 +254,15 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
         _logging.getLogger(__name__).info("Client signup verification email dispatched to %s (sent=%s)", clean_email, email_sent)
 
         if email_sent:
-            msg = f"A 6-digit verification code has been dispatched to {clean_email}."
+            msg = f"A 6-digit verification code has been dispatched to {clean_email}. Please check your inbox and spam folder."
         else:
-            msg = f"Account created. If email delivery is delayed, your 6-digit verification code is: {otp_code}"
+            msg = "Account created. However, verification email dispatch encountered an issue. Please click 'Resend Code' or check your email settings."
 
         return SignupResponse(
             status="pending_verification",
             message=msg,
             email=clean_email,
             requires_otp=True,
-            dev_code=otp_code,
             email_sent=email_sent,
         )
 
@@ -345,7 +348,10 @@ def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
 
     user = UserRepository.get_by_email(db, clean_email)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No registration found for this email.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No registration found for this email. Please check your email address or sign up first.",
+        )
 
     if getattr(user, "is_verified", False):
         access_token = create_access_token(data={"sub": str(getattr(user, "email", "")), "role": str(getattr(user, "role", "candidate")), "id": getattr(user, "id", None)})
@@ -357,6 +363,14 @@ def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
             full_name=getattr(user, "full_name", None),
             custom_user_id=getattr(user, "custom_user_id", None),
             approval_status=str(getattr(user, "approval_status", "approved")),
+        )
+
+    # Check attempt lockout
+    attempts = getattr(user, "email_verification_attempts", 0) or 0
+    if attempts >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Too many invalid attempts. For security, please click 'Resend Code' to receive a new code.",
         )
 
     saved_code = getattr(user, "email_verification_code", None)
@@ -373,15 +387,25 @@ def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
             )
 
     if not saved_code or saved_code != code:
+        new_attempts = attempts + 1
+        setattr(user, "email_verification_attempts", new_attempts)
+        db.commit()
+        remaining = max(0, 5 - new_attempts)
+        if remaining > 0:
+            err_msg = f"Invalid 6-digit verification code. Please check your email and try again ({remaining} attempts remaining)."
+        else:
+            err_msg = "Too many invalid attempts. Please click 'Resend Code' to receive a new code."
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid 6-digit verification code. Please check your email and try again.",
+            detail=err_msg,
         )
 
+    # Account activation
     setattr(user, "is_verified", True)
     setattr(user, "email_verified_at", now)
     setattr(user, "email_verification_code", None)
     setattr(user, "email_verification_expires_at", None)
+    setattr(user, "email_verification_attempts", 0)
     setattr(user, "is_active", True)
     setattr(user, "approval_status", "approved")
     setattr(user, "last_login", now)
@@ -425,16 +449,33 @@ def resend_signup_otp(body: ResendOtpRequest, db: Session = Depends(get_db)):
     clean_email = body.email.strip().lower()
     user = UserRepository.get_by_email(db, clean_email)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No registration found for this email.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No registration found for this email. Please check your email address or sign up first.",
+        )
 
     if getattr(user, "is_verified", False):
         return {"status": "already_verified", "message": "Email is already verified. Please sign in."}
 
-    import random
-    otp_code = f"{random.randint(100000, 999999)}"
     now = datetime.now(timezone.utc)
+    last_sent = getattr(user, "email_verification_last_sent_at", None)
+    if last_sent:
+        if last_sent.tzinfo is None:
+            last_sent = last_sent.replace(tzinfo=timezone.utc)
+        elapsed = (now - last_sent).total_seconds()
+        if elapsed < 60:
+            retry_after = int(60 - elapsed)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {retry_after}s before requesting another verification code.",
+            )
+
+    import secrets
+    otp_code = f"{secrets.randbelow(900000) + 100000}"
     setattr(user, "email_verification_code", otp_code)
     setattr(user, "email_verification_expires_at", now + timedelta(minutes=15))
+    setattr(user, "email_verification_attempts", 0)
+    setattr(user, "email_verification_last_sent_at", now)
     db.commit()
 
     from backend.services.email_service import send_signup_verification_code
@@ -445,12 +486,11 @@ def resend_signup_otp(body: ResendOtpRequest, db: Session = Depends(get_db)):
     if email_sent:
         msg = f"A new 6-digit verification code has been dispatched to {clean_email}."
     else:
-        msg = f"New verification code generated. If email delivery is delayed, your code is: {otp_code}"
+        msg = "Failed to dispatch verification email. Please check your email configuration or try again shortly."
 
     return {
         "status": "success",
         "message": msg,
-        "dev_code": otp_code,
         "email_sent": email_sent,
     }
 
@@ -625,11 +665,11 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
                 detail="Your Recruiter registration request was rejected by the Authorizer. Please contact administration.",
             )
 
-    # 6. Verification Check: Clients with pending verification code must verify
-    if user_role == "candidate" and getattr(user, "is_verified", None) is False and getattr(user, "email_verification_code", None) is not None:
+    # 6. Verification Check: Candidate accounts must be verified
+    if user_role == "candidate" and not getattr(user, "is_verified", False):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your email is not verified yet. Please enter the 6-digit verification code sent to your inbox.",
+            detail="Your email is not verified yet. Please enter the 6-digit verification code sent to your email to activate your account.",
         )
 
 

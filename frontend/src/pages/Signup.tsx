@@ -179,8 +179,11 @@ const Signup = () => {
         setIsOtpStep(true);
         setOtpError(null);
         setResendCooldown(60);
-        if (res.dev_code) {
-          setResendSuccess(res.message);
+        if (res.email_sent === false) {
+          setOtpError("Account created, but verification email could not be delivered immediately. Please click 'Resend Code' or check your email settings.");
+          setResendSuccess(null);
+        } else {
+          setResendSuccess("A 6-digit verification code has been dispatched to your email address. Please check your inbox and spam folder.");
         }
       } else {
         setIsSubmittedSuccess(true);
@@ -221,7 +224,11 @@ const Signup = () => {
 
     try {
       const res = await authService.resendSignupOtp(formData.email);
-      setResendSuccess(res?.message || "A new 6-digit code has been dispatched to your email.");
+      if (res?.email_sent === false) {
+        setOtpError("Email delivery encountered an issue. Please click 'Resend Code' or verify your email provider.");
+      } else {
+        setResendSuccess(res?.message || "A new 6-digit verification code has been dispatched to your email.");
+      }
       setResendCooldown(60);
     } catch (err: any) {
       setOtpError(err?.message || "Failed to resend verification code.");

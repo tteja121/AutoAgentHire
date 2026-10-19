@@ -9,7 +9,7 @@ SQLAlchemy handles Column -> Python type conversion at runtime.
 from typing import List, Optional, Dict, Any, cast
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, asc, and_, or_
+from sqlalchemy import desc, asc, and_, or_, func
 
 try:
     from backend.database.models_complete import (
@@ -36,8 +36,9 @@ class UserRepository:
     @staticmethod
     def create(db: Session, email: str, hashed_password: str, **kwargs) -> User:
         """Create a new user"""
+        clean_email = email.strip().lower() if email else ""
         user = User(
-            email=email,
+            email=clean_email,
             hashed_password=hashed_password,
             **kwargs
         )
@@ -53,8 +54,11 @@ class UserRepository:
     
     @staticmethod
     def get_by_email(db: Session, email: str) -> Optional[User]:
-        """Get user by email"""
-        return db.query(User).filter(User.email == email).first()
+        """Get user by email (case-insensitive)"""
+        if not email:
+            return None
+        clean_email = email.strip().lower()
+        return db.query(User).filter(func.lower(User.email) == clean_email).first()
     
     @staticmethod
     def get_by_uuid(db: Session, uuid: str) -> Optional[User]:

@@ -145,7 +145,7 @@ export const authService = {
       custom_user_id: bData.custom_user_id || null,
       session: bData.access_token ? { access_token: bData.access_token } : null,
       requires_otp: Boolean(bData.requires_otp),
-      dev_code: bData.dev_code || null,
+      email_sent: bData.email_sent !== false,
       message: bData.message,
       email: bData.email || params.email,
     };

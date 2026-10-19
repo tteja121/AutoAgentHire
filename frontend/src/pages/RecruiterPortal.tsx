@@ -141,7 +141,6 @@ export default function RecruiterPortal() {
   const [verificationOtpCode, setVerificationOtpCode] = useState("");
   const [isRequestingOtp, setIsRequestingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
-  const [otpDevHint, setOtpDevHint] = useState("");
 
   // Interview Scheduling State
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
@@ -574,9 +573,6 @@ export default function RecruiterPortal() {
 
       setPendingEmailToVerify(cleanEmail);
       setVerificationOtpCode("");
-      if (resp.data?.dev_code) {
-        setOtpDevHint(resp.data.dev_code);
-      }
       setIsVerifyEmailOpen(true);
       toast({
         title: "Verification Code Sent 📨",
@@ -639,7 +635,6 @@ export default function RecruiterPortal() {
       setIsEditProfileOpen(false);
       setVerificationOtpCode("");
       setPendingEmailToVerify("");
-      setOtpDevHint("");
 
       toast({
         title: "Official Email Verified & Saved! ✨",
@@ -3045,12 +3040,6 @@ export default function RecruiterPortal() {
                 Code expires in 15 minutes. Check your corporate inbox or spam folder.
               </p>
             </div>
-
-            {otpDevHint && (
-              <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs text-center font-mono">
-                Security Sandbox Code: <strong>{otpDevHint}</strong>
-              </div>
-            )}
 
             <div className="pt-1 flex items-center justify-between text-xs">
               <button
