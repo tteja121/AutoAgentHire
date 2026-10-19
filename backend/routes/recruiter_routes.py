@@ -926,6 +926,8 @@ def delete_user_by_authorizer(
 
 @router.get("/authorizer/audit-logs")
 def get_audit_logs(
+    limit: int = 500,
+    action: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -933,7 +935,10 @@ def get_audit_logs(
     if current_user.role != "authorizer":
         raise HTTPException(status_code=403, detail="Authorizer permission required")
 
-    logs = db.query(AuditLog).order_by(desc(AuditLog.timestamp)).limit(100).all()
+    query = db.query(AuditLog)
+    if action:
+        query = query.filter(AuditLog.action == action)
+    logs = query.order_by(desc(AuditLog.timestamp)).limit(min(limit, 1000)).all()
     return [
         {
             "id": log.id,
@@ -1250,7 +1255,7 @@ def serve_file(
 
 @router.get("/applications/{application_id}/analyze-resume")
 @router.post("/applications/{application_id}/analyze-resume")
-async def analyze_candidate_resume(
+async def analyze_application_resume(
     application_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

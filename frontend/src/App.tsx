@@ -164,9 +164,22 @@ const App = () => (
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/auth-callback" element={<AuthCallback />} />
               <Route path="/callback" element={<AuthCallback />} />
-              <Route path="/onboarding" element={<OnboardingIntegrated />} />
+              <Route
+                path="/onboarding"
+                element={
+                  <RoleProtectedRoute allowedRoles={["candidate", "admin"]}>
+                    <OnboardingIntegrated />
+                  </RoleProtectedRoute>
+                }
+              />
               {/* Client Portal routes with Sidebar */}
-              <Route element={<DashboardLayout />}>
+              <Route
+                element={
+                  <RoleProtectedRoute allowedRoles={["candidate", "admin"]}>
+                    <DashboardLayout />
+                  </RoleProtectedRoute>
+                }
+              >
                 <Route path="/ats-checker" element={<Navigate to="/candidate/jobs" replace />} />
                 <Route path="/candidate/jobs" element={<CandidateJobsPage />} />
                 <Route path="/jobs" element={<Navigate to="/candidate/jobs" replace />} />

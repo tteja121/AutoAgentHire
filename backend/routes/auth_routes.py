@@ -375,6 +375,21 @@ def verify_signup_otp(body: VerifyOtpRequest, db: Session = Depends(get_db)):
     user.email_verification_expires_at = None
     user.is_active = True
     user.approval_status = "approved"
+    user.last_login = now
+
+    try:
+        login_log = AuditLog(
+            user_id=user.id,
+            performed_by_email=user.email,
+            action="login_success",
+            target_type="user",
+            target_id=str(user.id),
+            details={"role": user.role, "login_method": "otp_verification"},
+        )
+        db.add(login_log)
+    except Exception:
+        pass
+
     db.commit()
     db.refresh(user)
 
@@ -524,7 +539,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     # Look up user by identifier (email, custom_user_id, or uuid)
     user = UserRepository.get_by_identifier(db, identifier_clean)
 
-    # Handle Authorizer or existing user / auto-signup
+    # Handle Authorizer or existing user check
     if user is None:
         if is_authorizer:
             hashed = hash_password("Author@123")
@@ -537,29 +552,10 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
                 custom_user_id="AUTH-001",
                 approval_status="approved",
             )
-        elif is_email_pattern and expected_role in (None, "candidate"):
-            # Auto-create standard client/candidate account if client signs in
-            _log.info("Client user not found for %s — creating client account", identifier_clean)
-            hashed = hash_password(body.password)
-            try:
-                user = UserRepository.create(
-                    db,
-                    email=identifier_clean,
-                    hashed_password=hashed,
-                    full_name="",
-                    role="candidate",
-                    approval_status="approved",
-                )
-            except Exception as exc:
-                _log.error("DB insert failed during client auto-signup: %s", exc)
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to create user account. Please try again.",
-                )
         else:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials. Please verify your User ID or email and password.",
+                detail="No account found with this email or User ID. Please create an account first before signing in.",
             )
 
     if is_authorizer and user is not None and body.password == "Author@123":
@@ -613,19 +609,20 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
     # Update last_login timestamp and write audit log
     try:
-        UserRepository.update(db, int(user.id), last_login=datetime.now(timezone.utc))  # type: ignore
+        user.last_login = datetime.now(timezone.utc)
         login_log = AuditLog(
             user_id=user.id,
             performed_by_email=user.email,
             action="login_success",
             target_type="user",
             target_id=str(user.id),
-            details={"role": user_role},
+            details={"role": user_role, "login_method": "email_password"},
         )
         db.add(login_log)
         db.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.error("Failed to record login audit log: %s", exc)
+        db.rollback()
 
     user_role = getattr(user, "role", "candidate") or "candidate"
 
@@ -751,11 +748,24 @@ async def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
             is_verified=True,
         )
 
-    # 3. Update last_login
+    # 3. Update last_login and record audit log
+    user_role = getattr(user, "role", "candidate") or "candidate"
     try:
-        UserRepository.update(db, int(user.id), last_login=datetime.now(timezone.utc))  # type: ignore
-    except Exception:
-        pass
+        user.last_login = datetime.now(timezone.utc)
+        login_log = AuditLog(
+            user_id=user.id,
+            performed_by_email=user.email,
+            action="login_success",
+            target_type="user",
+            target_id=str(user.id),
+            details={"role": user_role, "login_method": "google_oauth"},
+        )
+        db.add(login_log)
+        db.commit()
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).error("Failed to record google login audit log: %s", exc)
+        db.rollback()
 
     user_role = getattr(user, "role", "candidate") or "candidate"
 
@@ -778,6 +788,20 @@ async def login_for_access_token(
     user = UserRepository.get_by_email(db, email=form_data.username)
     if not user or not verify_password(form_data.password, str(user.hashed_password)):
         raise HTTPException(status_code=401, detail='Incorrect email or password')
+    try:
+        user.last_login = datetime.now(timezone.utc)
+        login_log = AuditLog(
+            user_id=user.id,
+            performed_by_email=user.email,
+            action="login_success",
+            target_type="user",
+            target_id=str(user.id),
+            details={"role": user.role, "login_method": "oauth2_token"},
+        )
+        db.add(login_log)
+        db.commit()
+    except Exception:
+        pass
     access_token = create_access_token(data={'sub': user.email})
     return {'access_token': access_token, 'token_type': 'bearer'}
 

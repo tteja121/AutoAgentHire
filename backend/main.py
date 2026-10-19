@@ -153,7 +153,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # CORS Middleware: allow localhost regex only during development
 _is_development = getattr(settings, "APP_ENV", "development").lower() == "development" or getattr(settings, "DEBUG", False)
-cors_origins = settings.cors_origins_list if hasattr(settings, 'cors_origins_list') else [o.strip() for o in str(settings.CORS_ORIGINS).split(',') if o.strip()]
+cors_origins = settings.cors_origins_list if hasattr(settings, 'cors_origins_list') else [o.strip() for o in settings.CORS_ORIGINS.split(',') if o.strip()]
 
 cors_params = {
     "allow_origins": cors_origins,

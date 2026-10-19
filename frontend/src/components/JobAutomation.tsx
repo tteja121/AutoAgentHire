@@ -1168,17 +1168,6 @@ export default function JobAutomation() {
                     {/* Bottom Action Row */}
                     <div className="pt-3 border-t border-border/50 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        {/* Optimize Resume Button */}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleOpenOptimizeModal(job)}
-                          className="text-xs flex items-center gap-1.5 border-primary/30 text-primary hover:bg-primary/10"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-primary" />
-                          <span>Optimize Resume</span>
-                        </Button>
-
                         {/* Apply Single Button */}
                         {job.applied ? (
                           <Badge className="bg-emerald-600 text-white font-medium flex items-center gap-1 text-xs py-1 px-3">

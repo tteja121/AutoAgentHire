@@ -140,12 +140,14 @@ const Login = () => {
       }
     } catch (err: any) {
       const msg = err?.message || "";
-      if (msg.toLowerCase().includes("invalid login credentials") || msg.toLowerCase().includes("invalid credentials")) {
+      if (msg.toLowerCase().includes("no account found") || msg.toLowerCase().includes("create an account")) {
+        setError("No account found with this email. Please sign up to create an account first.");
+      } else if (msg.toLowerCase().includes("invalid login credentials") || msg.toLowerCase().includes("invalid credentials")) {
         setError("Invalid Email/User ID or password. Please verify your credentials.");
       } else if (msg.toLowerCase().includes("pending")) {
         setError("Your Recruiter registration request is pending review by the Authorizer. Please wait for authorizer permission before logging in.");
-      } else if (msg.toLowerCase().includes("email not confirmed")) {
-        setError("Your email address is not confirmed yet. Please verify your email inbox.");
+      } else if (msg.toLowerCase().includes("email not confirmed") || msg.toLowerCase().includes("not verified")) {
+        setError("Your email address is not verified yet. Please verify your email inbox.");
       } else {
         setError(msg || "Login failed. Please verify your credentials.");
       }
