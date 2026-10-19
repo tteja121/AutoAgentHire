@@ -75,9 +75,6 @@ jobs:
 
     - name: Run tests
       env:
-        DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/autoagenthire_test
-        SYNC_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/autoagenthire_test
-        REDIS_URL: redis://localhost:6379/0
         SECRET_KEY: test-secret-key-at-least-32-chars-long-for-testing!
         OPENAI_API_KEY: test-key
       run: |
