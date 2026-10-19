@@ -141,7 +141,6 @@ def create_initial_state(input_data: AgentInput) -> AgentState:
         "education": [],
         
         # Initialize empty collections
-        "extracted_skills": [],
         "job_listings": [],
         "search_queries": [],
         "total_jobs_found": 0,

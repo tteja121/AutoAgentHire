@@ -412,7 +412,7 @@ async def apply_all_jobs(
         # Ensure a matching JobPosting exists in SQLite database so Foreign Key is valid
         db_job = None
         try:
-            if isinstance(j_id, int) or (isinstance(j_id, str) and str(j_id).isdigit()):
+            if isinstance(j_id, int) or (isinstance(j_id, str) and j_id.isdigit()):
                 db_job = db.query(JobPosting).filter(JobPosting.id == int(j_id)).first()
         except Exception:
             db_job = None

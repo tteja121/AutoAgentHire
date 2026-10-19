@@ -300,7 +300,7 @@ Return a single VALID JSON object (with NO other text outside JSON) adhering str
     "inferences": [string]
   }},
   "job_match": {{
-    "has_job_description": { "true" if jd_prompt_section else "false" },
+    "has_job_description": {"true" if jd_prompt_section else "false"},
     "overall_score": number (0-100) or null,
     "matching_required_skills": [string],
     "missing_required_skills": [string],

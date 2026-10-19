@@ -855,16 +855,30 @@ if __name__ == "__main__":
         
         # Mock browser for testing
         class MockBrowser:
-            async def initialize_browser(self): pass
-            async def login_linkedin(self): return True
-            async def search_jobs(self, keywords, location): pass
-            async def collect_job_listings(self, max_jobs): 
+            async def initialize_browser(self):
+                pass
+
+            async def login_linkedin(self):
+                return True
+
+            async def search_jobs(self, keywords, location):
+                pass
+
+            async def collect_job_listings(self, max_jobs):
                 return [
-                    {'job_id': '123', 'title': 'ML Engineer', 'company': 'Tech Corp', 'description': 'Great opportunity...'}
+                    {
+                        'job_id': '123',
+                        'title': 'ML Engineer',
+                        'company': 'Tech Corp',
+                        'description': 'Great opportunity...',
+                    }
                 ]
-            async def apply_to_single_job(self, job): 
+
+            async def apply_to_single_job(self, job):
                 return {'success': True, 'status': 'success'}
-            async def close(self): pass
+
+            async def close(self):
+                pass
         
         browser = MockBrowser()
         

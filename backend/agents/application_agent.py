@@ -1,13 +1,12 @@
 """
 Application Agent - Automates job applications.
 Handles cover letter generation and form filling.
-Enhanced with AI-powered profile matching to auto-apply only to high-match jobs.
+Enhanced with AI-powered profile matching to auto-apply only to high-match
+jobs.
 """
-from typing import Dict, Any, Optional
-import os
 import logging
-# from crewai import Agent
-# from backend.agents.tools import CoverLetterTool, FormFillerTool
+import os
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,8 @@ class ApplicationAgent:
         Initialize the application agent.
 
         Args:
-            ai_provider: AI provider for cover letter generation (gemini, groq, openai)
+            ai_provider: AI provider for cover letter generation
+                (gemini, groq, openai)
             api_key: Optional API key for the AI provider
             min_auto_apply_score: Minimum match score required for
                 auto-apply (default: 70)
@@ -60,7 +60,8 @@ class ApplicationAgent:
         force_apply: bool = False
     ) -> Dict[str, Any]:
         """
-        Apply to a job posting with intelligent auto-apply based on match score.
+        Apply to a job posting with intelligent auto-apply based on
+        match score.
 
         Args:
             job: Job dictionary with optional 'match' field
@@ -82,12 +83,16 @@ class ApplicationAgent:
                     "job_id": job.get("id", "unknown"),
                     "job_title": job.get("title", "Unknown"),
                     "company": job.get("company", "Unknown"),
-                    "match_score": job.get("match", {}).get("match_score", 0),
+                    "match_score": job.get("match", {}).get(
+                        "match_score", 0
+                    ),
                     "reason": (
                         "Match score below threshold or recommendation "
                         "is not 'Apply'"
                     ),
-                    "message": "Job skipped - does not meet auto-apply criteria"
+                    "message": (
+                        "Job skipped - does not meet auto-apply criteria"
+                    )
                 }
 
             # Generate cover letter if AI service is available
@@ -105,8 +110,8 @@ class ApplicationAgent:
             from backend.agents.autoagenthire_bot import AutoAgentHireBot
 
             enable_auto_apply = os.getenv(
-                "ENABLE_AUTO_APPLY", "false").lower() in (
-                "true", "1", "yes")
+                "ENABLE_AUTO_APPLY", "false"
+            ).lower() in ("true", "1", "yes")
             bot_config = {
                 "linkedin_email": None,
                 "resume_path": None,
@@ -126,18 +131,22 @@ class ApplicationAgent:
                     pass
 
             # Normalize
-            status = "submitted" if result.get(
-                "success") and auto_submit else "pending_review"
+            status = "submitted" if (
+                result.get("success") and auto_submit
+            ) else "pending_review"
             if result.get("success") and bot_config["dry_run"]:
                 status = "dry_run"
 
+            cl_summary = (
+                cover_letter[:200] + "..." if cover_letter else None
+            )
             return {
                 "status": status,
                 "job_id": job.get("id", "unknown"),
                 "job_title": job.get("title", "Unknown"),
                 "company": job.get("company", "Unknown"),
                 "match_score": job.get("match", {}).get("match_score", 0),
-                "cover_letter": cover_letter[:200] + "..." if cover_letter else None,
+                "cover_letter": cl_summary,
                 "message": result.get("message", "Application processed"),
                 "details": result,
             }
@@ -151,7 +160,8 @@ class ApplicationAgent:
             }
 
     def _should_auto_apply(
-            self, job: Dict[str, Any], force: bool = False) -> bool:
+        self, job: Dict[str, Any], force: bool = False
+    ) -> bool:
         """
         Determine if should auto-apply to a job based on match score.
 
@@ -167,27 +177,28 @@ class ApplicationAgent:
 
         if "match" not in job:
             # No match data - don't auto-apply
-            logger.info(
-                f"Job {
-                    job.get(
-                        'title',
-                        'Unknown')} has no match data - skipping")
+            j_title = job.get("title", "Unknown")
+            logger.info(f"Job {j_title} has no match data - skipping")
             return False
 
         match_score = job["match"].get("match_score", 0)
         recommendation = job["match"].get("recommendation", "Skip")
 
         # Apply if score meets threshold AND recommendation is "Apply"
-        should_apply = match_score >= self.min_auto_apply_score and recommendation == "Apply"
+        should_apply = (
+            match_score >= self.min_auto_apply_score
+            and recommendation == "Apply"
+        )
 
+        j_title = job.get("title", "Unknown")
         if not should_apply:
             logger.info(
-                f"Job {job.get('title', 'Unknown')} - Score: {match_score}, "
+                f"Job {j_title} - Score: {match_score}, "
                 f"Recommendation: {recommendation} - skipping"
             )
         else:
             logger.info(
-                f"Job {job.get('title', 'Unknown')} - Score: {match_score}, "
+                f"Job {j_title} - Score: {match_score}, "
                 f"Recommendation: {recommendation} - will apply"
             )
 
@@ -215,7 +226,8 @@ class ApplicationAgent:
         try:
             if not self.ai_service:
                 logger.warning(
-                    "AI service not available for cover letter generation")
+                    "AI service not available for cover letter generation"
+                )
                 return ""
 
             # Extract user info from resume
@@ -228,10 +240,10 @@ class ApplicationAgent:
             # Build resume text
             resume_text = f"{summary}\n\nSkills: {', '.join(skills)}\n\n"
             for exp in experience[:3]:  # Include top 3 experiences
-                resume_text += f"{exp.get('title',
-                                          '')} at {exp.get('company',
-                                                           '')} - {exp.get('description',
-                                                                           '')}\n"
+                e_title = exp.get("title", "")
+                e_company = exp.get("company", "")
+                e_desc = exp.get("description", "")
+                resume_text += f"{e_title} at {e_company} - {e_desc}\n"
 
             cover_letter = self.ai_service.generate_cover_letter(
                 job_title=job_title,
