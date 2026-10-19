@@ -260,7 +260,7 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
             email=clean_email,
             requires_otp=True,
             dev_code=otp_code,
-            email_sent=bool(email_sent),
+            email_sent=email_sent,
         )
 
     # 7. For recruiters: ensure official email, company name, and assign unique User ID
@@ -451,7 +451,7 @@ def resend_signup_otp(body: ResendOtpRequest, db: Session = Depends(get_db)):
         "status": "success",
         "message": msg,
         "dev_code": otp_code,
-        "email_sent": bool(email_sent),
+        "email_sent": email_sent,
     }
 
 

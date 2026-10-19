@@ -27,9 +27,9 @@ def test_client_otp_flow():
     print("  Testing Free Client Account Creation with Email OTP")
     print("=" * 65)
 
-    test_email = "hyrai.auto@gmail.com"  # send real verification OTP to verified inbox!
+    test_email = "test.candidate@autoagenthire.test"
     test_password = "Password123!"
-    test_name = "Test Client User"
+    test_name = "Automated Test Candidate"
 
     db = SessionLocal()
     try:

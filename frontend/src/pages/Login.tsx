@@ -396,7 +396,7 @@ const Login = () => {
               ) : (
                 <GoogleIcon />
               )}
-              Continue with Google (Client Portal)
+              Continue with Google
             </Button>
           </div>
 
