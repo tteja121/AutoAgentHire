@@ -764,8 +764,15 @@ const Applications = () => {
                 Loading applications...
               </div>
             ) : filteredApplications.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                No applications found. Start your job search to see applications here.
+              <div className="text-center py-12 text-muted-foreground space-y-3">
+                <Briefcase className="w-12 h-12 mx-auto opacity-40 text-primary" />
+                <p className="text-sm font-medium text-foreground">No applications tracked yet</p>
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                  Browse open positions from verified recruiters and submit your applications to track them here in real-time.
+                </p>
+                <Button variant="hero" size="sm" asChild className="mt-2 text-xs">
+                  <Link to="/candidate/jobs">Browse Verified Jobs</Link>
+                </Button>
               </div>
             ) : (
               <div className="overflow-x-auto">

@@ -789,20 +789,20 @@ async def login_for_access_token(
     if not user or not verify_password(form_data.password, str(user.hashed_password)):
         raise HTTPException(status_code=401, detail='Incorrect email or password')
     try:
-        user.last_login = datetime.now(timezone.utc)
+        setattr(user, "last_login", datetime.now(timezone.utc))
         login_log = AuditLog(
-            user_id=user.id,
-            performed_by_email=user.email,
+            user_id=getattr(user, "id", None),
+            performed_by_email=str(getattr(user, "email", "")),
             action="login_success",
             target_type="user",
-            target_id=str(user.id),
-            details={"role": user.role, "login_method": "oauth2_token"},
+            target_id=str(getattr(user, "id", "")),
+            details={"role": getattr(user, "role", "user"), "login_method": "oauth2_token"},
         )
         db.add(login_log)
         db.commit()
     except Exception:
         pass
-    access_token = create_access_token(data={'sub': user.email})
+    access_token = create_access_token(data={'sub': str(getattr(user, "email", ""))})
     return {'access_token': access_token, 'token_type': 'bearer'}
 
 

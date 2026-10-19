@@ -25,10 +25,15 @@ export const Footer = () => {
           <div>
             <h4 className="font-semibold mb-4 text-foreground">Product</h4>
             <ul className="space-y-3 text-sm">
-              {["Features", "How It Works", "Browse Jobs", "Recruiter Portal"].map((item) => (
-                <li key={item}>
-                  <Link to="/" className="text-muted-foreground hover:text-primary transition-colors">
-                    {item}
+              {[
+                { name: "Features", href: "/#features" },
+                { name: "How It Works", href: "/#how-it-works" },
+                { name: "Browse Jobs", href: "/candidate/jobs" },
+                { name: "Recruiter Portal", href: "/recruiter" },
+              ].map((item) => (
+                <li key={item.name}>
+                  <Link to={item.href} className="text-muted-foreground hover:text-primary transition-colors">
+                    {item.name}
                   </Link>
                 </li>
               ))}
@@ -36,12 +41,17 @@ export const Footer = () => {
           </div>
 
           <div>
-            <h4 className="font-semibold mb-4 text-foreground">Company</h4>
+            <h4 className="font-semibold mb-4 text-foreground">Portals & Access</h4>
             <ul className="space-y-3 text-sm">
-              {["About", "Blog", "Careers", "Contact"].map((item) => (
-                <li key={item}>
-                  <Link to="/" className="text-muted-foreground hover:text-primary transition-colors">
-                    {item}
+              {[
+                { name: "Candidate Dashboard", href: "/dashboard" },
+                { name: "Recruiter Registration", href: "/recruiter/register" },
+                { name: "Authorizer Governance", href: "/authorizer" },
+                { name: "Sign In / Portal Access", href: "/login" },
+              ].map((item) => (
+                <li key={item.name}>
+                  <Link to={item.href} className="text-muted-foreground hover:text-primary transition-colors">
+                    {item.name}
                   </Link>
                 </li>
               ))}
@@ -75,10 +85,10 @@ export const Footer = () => {
           </div>
 
           <div className="flex items-center gap-4">
-            <Link to="/" className="text-muted-foreground hover:text-primary transition-colors text-sm">
+            <Link to="/privacy" className="text-muted-foreground hover:text-primary transition-colors text-sm">
               Privacy Policy
             </Link>
-            <Link to="/" className="text-muted-foreground hover:text-primary transition-colors text-sm">
+            <Link to="/terms" className="text-muted-foreground hover:text-primary transition-colors text-sm">
               Terms of Service
             </Link>
           </div>

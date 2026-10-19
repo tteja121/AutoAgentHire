@@ -195,7 +195,10 @@ const App = () => (
                   </RoleProtectedRoute>
                 }
               />
+              <Route path="/privacy" element={<Navigate to="/#features" replace />} />
+              <Route path="/terms" element={<Navigate to="/#features" replace />} />
               <Route path="/recruiter/register" element={<RecruiterRegister />} />
+              <Route path="/recruiter-register" element={<Navigate to="/recruiter/register" replace />} />
               <Route
                 path="/authorizer"
                 element={

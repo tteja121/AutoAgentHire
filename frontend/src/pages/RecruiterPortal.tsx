@@ -986,6 +986,17 @@ export default function RecruiterPortal() {
             <Settings className="w-4 h-4" />
             <span className="flex-1 text-left">Profile & Settings</span>
           </button>
+
+          <div className="pt-3 border-t border-white/5">
+            <Link
+              to="/candidate/jobs"
+              target="_blank"
+              className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-medium text-primary hover:bg-primary/10 border border-primary/20 transition-all"
+            >
+              <ExternalLink className="w-4 h-4 text-primary" />
+              <span className="flex-1 text-left">Candidate Job Board</span>
+            </Link>
+          </div>
         </div>
 
         {/* Recruiter Profile / User ID info & Logout */}
@@ -1261,17 +1272,29 @@ export default function RecruiterPortal() {
                   Create and publish a verified job listing for prospective candidates across Pacific Time windows.
                 </p>
               </div>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setActiveTab("tracking");
-                  loadTrackingData();
-                }}
-                className="gap-2"
-              >
-                <Clock className="w-4 h-4" />
-                Go to Tracking Section
-              </Button>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  asChild
+                  className="gap-2 border-primary/30 text-primary hover:bg-primary/10"
+                >
+                  <Link to="/candidate/jobs" target="_blank">
+                    <ExternalLink className="w-4 h-4" />
+                    Preview Live Board
+                  </Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setActiveTab("tracking");
+                    loadTrackingData();
+                  }}
+                  className="gap-2"
+                >
+                  <Clock className="w-4 h-4" />
+                  Go to Tracking Section
+                </Button>
+              </div>
             </div>
 
             <form onSubmit={handleCreateJob} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1872,6 +1895,18 @@ export default function RecruiterPortal() {
                               {job.applications_count || 0} Candidate Application{(job.applications_count || 0) === 1 ? "" : "s"}
                             </span>
                             <div className="flex items-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                asChild
+                                className="text-xs h-8 text-primary hover:text-primary/80"
+                                title="View on Candidate Job Board"
+                              >
+                                <Link to="/candidate/jobs" target="_blank">
+                                  <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                                  Live Board
+                                </Link>
+                              </Button>
                               <Button
                                 variant="outline"
                                 size="sm"

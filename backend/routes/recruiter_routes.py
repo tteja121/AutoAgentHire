@@ -4,7 +4,7 @@ Recruiter & Authorizer & Candidate Job Posting and Application Routes
 
 import os
 import uuid as _uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from pydantic import BaseModel, Field
@@ -33,12 +33,12 @@ class JobCreateRequest(BaseModel):
     recruiting_process: Optional[str] = None
     job_type: str = Field(default="Full-time")
     location: str = Field(default="Remote")
-    start_date_pt: str = Field(..., description="e.g. 2026-10-15 09:00:00 PDT")
-    final_date_pt: str = Field(..., description="e.g. 2026-11-15 17:00:00 PDT")
+    start_date_pt: Optional[str] = Field(default=None, description="e.g. 2026-10-15 09:00:00 IST")
+    final_date_pt: Optional[str] = Field(default=None, description="e.g. 2026-11-15 17:00:00 IST")
     company_name: Optional[str] = None
     company_logo_url: Optional[str] = None
     organization_symbol: Optional[str] = None
-    status: Optional[str] = Field(default="pending_approval", description="'pending_approval' or 'draft'")
+    status: Optional[str] = Field(default="approved", description="'approved' or 'draft'")
 
 
 class JobUpdateRequest(BaseModel):
@@ -180,9 +180,9 @@ def create_job(
     db: Session = Depends(get_db),
 ):
     """Recruiter posts a new job vacancy."""
-    if current_user.role != "recruiter":
+    if current_user.role not in ("recruiter", "authorizer", "admin"):
         raise HTTPException(status_code=403, detail="Recruiter access required")
-    if current_user.approval_status != "approved":
+    if current_user.role == "recruiter" and current_user.approval_status in ("pending_approval", "rejected"):
         raise HTTPException(status_code=403, detail="Recruiter registration request is pending Authorizer approval")
 
     company_name = payload.company_name or getattr(current_user, "company_name", None) or "Your Organization"
@@ -190,6 +190,10 @@ def create_job(
 
     # For authorized recruiters, new postings are immediately approved and published to candidate board
     initial_status = "draft" if payload.status == "draft" else "approved"
+
+    now = datetime.now(timezone.utc)
+    start_date = payload.start_date_pt.strip() if (payload.start_date_pt and payload.start_date_pt.strip()) else now.strftime("%Y-%m-%d %H:%M:%S IST")
+    final_date = payload.final_date_pt.strip() if (payload.final_date_pt and payload.final_date_pt.strip()) else (now + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S IST")
 
     new_job = JobPosting(
         recruiter_id=current_user.id,
@@ -205,14 +209,34 @@ def create_job(
         requirements=payload.requirements or "",
         skills=payload.skills or "",
         recruiting_process=payload.recruiting_process or "",
-        start_date_pt=payload.start_date_pt,
-        final_date_pt=payload.final_date_pt,
+        start_date_pt=start_date,
+        final_date_pt=final_date,
         timezone="Asia/Kolkata (IST)",
         status=initial_status,
     )
     db.add(new_job)
     db.commit()
     db.refresh(new_job)
+
+    # Broadcast notification to candidate users in the client portal
+    try:
+        from backend.database.models_complete import Notification
+        candidate_users = db.query(User).filter(User.role == "candidate").all()
+        for cand in candidate_users:
+            cand_id = getattr(cand, "id", None)
+            if cand_id:
+                notif = Notification(
+                    user_id=cand_id,
+                    title=f"New Job Posted: {new_job.title}",
+                    message=f"{company_name} is hiring for {new_job.title} ({new_job.location})! Click to review details and apply now.",
+                    type="job",
+                    action_href="/candidate/jobs",
+                    is_read=False,
+                )
+                db.add(notif)
+        db.commit()
+    except Exception as notif_err:
+        pass
 
     resp = JobPostingResponse.model_validate(new_job)
     resp.recruiter_name = str(current_user.full_name or current_user.email)
@@ -228,11 +252,14 @@ def update_job(
     db: Session = Depends(get_db),
 ):
     """Recruiter updates or edits a job vacancy (draft, returned, or existing)."""
-    if current_user.role != "recruiter":
+    if current_user.role not in ("recruiter", "authorizer", "admin"):
         raise HTTPException(status_code=403, detail="Recruiter access required")
-    if current_user.approval_status != "approved":
+    if current_user.role == "recruiter" and current_user.approval_status in ("pending_approval", "rejected"):
         raise HTTPException(status_code=403, detail="Recruiter registration request is pending Authorizer approval")
-    job = db.query(JobPosting).filter(JobPosting.id == job_id, JobPosting.recruiter_id == current_user.id).first()
+    query = db.query(JobPosting).filter(JobPosting.id == job_id)
+    if current_user.role == "recruiter":
+        query = query.filter(JobPosting.recruiter_id == current_user.id)
+    job = query.first()
     if not job:
         raise HTTPException(status_code=404, detail="Job posting not found or unauthorized")
 
@@ -963,7 +990,7 @@ def get_candidate_jobs(
     """Candidate Page displays active jobs posted by recruiters."""
     jobs = db.query(JobPosting).filter(
         JobPosting.status.in_(["approved", "active", "published", "pending_approval"])
-    ).order_by(desc(JobPosting.created_at)).all()
+    ).order_by(desc(JobPosting.id)).all()
     result = []
     for j in jobs:
         resp = JobPostingResponse.model_validate(j)

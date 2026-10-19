@@ -81,6 +81,11 @@ export const jobsService = {
         status: item.status || 'approved',
         created_at: item.created_at,
         company_name: item.company_name || 'AutoAgentHire Partner',
+        company_logo_url: item.company_logo_url,
+        organization_symbol: item.organization_symbol,
+        vacancies: item.vacancies || 1,
+        job_type: item.job_type || item.employment_type || 'Full-time',
+        recruiter_id: item.recruiter_id,
         companies: {
           id: item.recruiter_id || 1,
           name: item.company_name || 'AutoAgentHire Partner',
@@ -191,7 +196,7 @@ export const jobsService = {
       start_date_pt: new Date().toISOString(),
       final_date_pt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       company_name: jobData.company_name || 'Recruiter Company',
-      status: jobData.status || 'pending_approval',
+      status: jobData.status || 'approved',
     };
 
     const res = await apiClient.post(API_ENDPOINTS.recruiter.createJob, payload);
