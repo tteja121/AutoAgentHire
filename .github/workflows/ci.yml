@@ -78,9 +78,11 @@ jobs:
         SECRET_KEY: test-secret-key-at-least-32-chars-long-for-testing!
         OPENAI_API_KEY: test-key
         DATABASE_URL: sqlite:///./data/autoagenthire.db
+        PYTHONPATH: .
       run: |
         mkdir -p data
         pytest tests/
+
 
 
     - name: Upload coverage
