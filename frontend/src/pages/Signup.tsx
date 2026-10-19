@@ -66,15 +66,25 @@ const Signup = () => {
     return () => clearInterval(timer);
   }, [isOtpStep, resendCooldown]);
 
-  // Explicitly ensure form is clean and unpolluted by browser autofill on load
+  // Handle pre-filled email from login or URL redirect (?email=...&verify=1)
   useEffect(() => {
-    setFormData({
-      name: "",
-      email: "",
-      password: "",
-      confirmPassword: "",
-      agreeTerms: false,
-    });
+    const params = new URLSearchParams(window.location.search);
+    const emailParam = params.get("email");
+    const verifyParam = params.get("verify");
+    if (emailParam) {
+      setFormData((prev) => ({ ...prev, email: emailParam }));
+      if (verifyParam === "1") {
+        setIsOtpStep(true);
+      }
+    } else {
+      setFormData({
+        name: "",
+        email: "",
+        password: "",
+        confirmPassword: "",
+        agreeTerms: false,
+      });
+    }
     setError(null);
   }, []);
 
@@ -169,6 +179,9 @@ const Signup = () => {
         setIsOtpStep(true);
         setOtpError(null);
         setResendCooldown(60);
+        if (res.dev_code) {
+          setResendSuccess(res.message);
+        }
       } else {
         setIsSubmittedSuccess(true);
       }

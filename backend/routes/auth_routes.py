@@ -66,6 +66,8 @@ class SignupResponse(BaseModel):
     status: str = "success"
     email: str | None = None
     requires_otp: bool = False
+    dev_code: str | None = None
+    email_sent: bool = True
 
 
 class VerifyOtpRequest(BaseModel):
@@ -247,11 +249,18 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
         import logging as _logging
         _logging.getLogger(__name__).info("Client signup verification email dispatched to %s (sent=%s)", clean_email, email_sent)
 
+        if email_sent:
+            msg = f"A 6-digit verification code has been dispatched to {clean_email}."
+        else:
+            msg = f"Account created. If email delivery is delayed, your 6-digit verification code is: {otp_code}"
+
         return SignupResponse(
             status="pending_verification",
-            message=f"A 6-digit verification code has been dispatched to {clean_email}.",
+            message=msg,
             email=clean_email,
             requires_otp=True,
+            dev_code=otp_code,
+            email_sent=bool(email_sent),
         )
 
     # 7. For recruiters: ensure official email, company name, and assign unique User ID
@@ -433,9 +442,16 @@ def resend_signup_otp(body: ResendOtpRequest, db: Session = Depends(get_db)):
     import logging as _logging
     _logging.getLogger(__name__).info("Resent verification code dispatched to %s (sent=%s)", clean_email, email_sent)
 
+    if email_sent:
+        msg = f"A new 6-digit verification code has been dispatched to {clean_email}."
+    else:
+        msg = f"New verification code generated. If email delivery is delayed, your code is: {otp_code}"
+
     return {
         "status": "success",
-        "message": f"A new 6-digit verification code has been dispatched to {clean_email}.",
+        "message": msg,
+        "dev_code": otp_code,
+        "email_sent": bool(email_sent),
     }
 
 

@@ -117,7 +117,13 @@ def _send_via_smtp(
         smtp_port = int(os.getenv("SMTP_PORT", str(SMTP_PORT)))
     except (ValueError, TypeError):
         smtp_port = 587
-    smtp_from_email = os.getenv("SMTP_FROM_EMAIL", smtp_user or SMTP_FROM_EMAIL).strip()
+
+    # For Gmail, sender envelope must match authenticated account or verified domain
+    if "gmail.com" in smtp_host.lower():
+        smtp_from_email = smtp_user
+    else:
+        smtp_from_email = os.getenv("SMTP_FROM_EMAIL", smtp_user or SMTP_FROM_EMAIL).strip()
+
     smtp_from_name = os.getenv("SMTP_FROM_NAME", SMTP_FROM_NAME).strip()
     smtp_use_tls = os.getenv("SMTP_USE_TLS", "true").lower() in ("true", "1", "yes")
 
@@ -139,26 +145,49 @@ def _send_via_smtp(
 
         msg.attach(MIMEText(html_content, "html"))
 
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
-            if smtp_use_tls:
-                server.starttls()
+        # Ports to attempt: configured port first, with automatic fallback (587 STARTTLS <-> 465 SSL)
+        ports_to_try = [smtp_port]
+        if smtp_port == 587 and 465 not in ports_to_try:
+            ports_to_try.append(465)
+        elif smtp_port == 465 and 587 not in ports_to_try:
+            ports_to_try.append(587)
 
-        server.login(smtp_user, smtp_password)
-        server.sendmail(smtp_from_email, [to_email], msg.as_string())
-        server.quit()
+        last_error = None
+        for port in ports_to_try:
+            try:
+                if port == 465:
+                    server = smtplib.SMTP_SSL(smtp_host, port, timeout=12)
+                else:
+                    server = smtplib.SMTP(smtp_host, port, timeout=12)
+                    if smtp_use_tls:
+                        server.starttls()
 
-        message_id = f"smtp-{uuid.uuid4().hex[:12]}@{smtp_host}"
-        logger.info("[EmailService] SMTP email sent successfully to %s", to_email)
-        return True, message_id, None
-    except smtplib.SMTPAuthenticationError:
-        logger.error("[EmailService] SMTP Authentication failed for %s: check SMTP_USER/SMTP_PASSWORD", to_email)
-        return False, None, "SMTP authentication failed: verify SMTP_USER and SMTP_PASSWORD in .env"
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_from_email, [to_email], msg.as_string())
+                try:
+                    server.quit()
+                except Exception:
+                    pass
+
+                message_id = f"smtp-{uuid.uuid4().hex[:12]}@{smtp_host}"
+                logger.info("[EmailService] SMTP email sent successfully to %s via port %s", to_email, port)
+                return True, message_id, None
+            except smtplib.SMTPAuthenticationError as auth_err:
+                last_error = f"SMTP authentication failed: verify SMTP_USER and SMTP_PASSWORD: {auth_err}"
+                logger.error("[EmailService] %s for %s", last_error, to_email)
+                break
+            except Exception as port_err:
+                sanitized_err = str(port_err).replace(smtp_password, "[REDACTED]")
+                last_error = f"SMTP failure on port {port}: {sanitized_err}"
+                logger.warning(
+                    "[EmailService] Port %s attempt failed for %s (%s). Attempting alternative port if available...",
+                    port, to_email, sanitized_err
+                )
+
+        return False, None, last_error or "All SMTP connection attempts failed"
     except Exception as exc:
         sanitized_err = str(exc).replace(smtp_password, "[REDACTED]")
-        logger.error("[EmailService] SMTP error for %s: %s", to_email, sanitized_err)
+        logger.error("[EmailService] General SMTP error for %s: %s", to_email, sanitized_err)
         return False, None, f"SMTP failure: {sanitized_err}"
 
 
@@ -177,17 +206,19 @@ def send_email(
     # 1. Try Resend if configured
     resend_key = os.getenv("RESEND_API_KEY", RESEND_API_KEY)
     if resend_key:
-        success, _, _ = _send_via_resend(clean_to, subject, html_content, plain_text)
+        success, _, err = _send_via_resend(clean_to, subject, html_content, plain_text)
         if success:
             return True
+        logger.warning("[EmailService] Resend failed (%s), attempting SMTP fallback...", err)
 
-    # 2. Try SMTP fallback (Gmail App Password, etc.)
+    # 2. Try SMTP fallback (Gmail App Password, etc. with port 587/465 retry)
     smtp_user = os.getenv("SMTP_USER", SMTP_USER).strip()
     smtp_password = os.getenv("SMTP_PASSWORD", SMTP_PASSWORD).replace(" ", "").strip()
     if smtp_user and smtp_password:
-        success, _, _ = _send_via_smtp(clean_to, subject, html_content, plain_text)
+        success, _, err = _send_via_smtp(clean_to, subject, html_content, plain_text)
         if success:
             return True
+        logger.warning("[EmailService] SMTP delivery failed: %s", err)
 
     logger.warning("[EmailService] All configured email providers failed for %s", clean_to)
     return False
@@ -685,6 +716,10 @@ def send_email_change_verification_code(
         f"AutoAgentHire Security Desk\n{WEBSITE_URL}\n"
     )
     
+    logger.info(
+        "[OTP DISPATCH] 6-digit email update code for %s is: %s (expires in %s min)",
+        to_email, verification_code, expires_in_minutes
+    )
     return send_email(to_email, subject, html, plain_text)
 
 
@@ -760,6 +795,10 @@ def send_signup_verification_code(
         f"— AutoAgentHire Team\n{WEBSITE_URL}\n"
     )
 
+    logger.info(
+        "[OTP DISPATCH] 6-digit Client signup code for %s is: %s (expires in %s min)",
+        to_email, verification_code, expires_in_minutes
+    )
     return send_email(to_email, subject, html, plain_text)
 
 

@@ -271,7 +271,17 @@ const Login = () => {
               ) : (
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               )}
-              <div className="leading-relaxed">{error}</div>
+              <div className="leading-relaxed">
+                <div>{error}</div>
+                {error.toLowerCase().includes("not verified") && identifier && (
+                  <Link
+                    to={`/signup?email=${encodeURIComponent(identifier)}&verify=1`}
+                    className="inline-block mt-1.5 font-semibold text-primary hover:underline"
+                  >
+                    Enter 6-digit OTP to verify account &rarr;
+                  </Link>
+                )}
+              </div>
             </motion.div>
           )}
 
