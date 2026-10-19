@@ -269,7 +269,9 @@ export default function JobAutomation() {
 
       toast({
         title: extractedProfile.ai_powered ? '✨ Google Gemini AI Analysis Complete!' : 'Resume Analysis Ready',
-        description: `Extracted ${allSkills.length} skills, evaluated ${parsedExp} experience, and matched ${jobsFromBackend.length} active database vacancies.`,
+        description: jobsFromBackend.length > 0
+          ? `Extracted ${allSkills.length} skills, evaluated ${parsedExp} experience, and matched ${jobsFromBackend.length} active database vacancies.`
+          : `Extracted ${allSkills.length} skills, evaluated ${parsedExp} experience. No active job vacancies have been posted to the platform yet.`,
       });
 
     } catch (err: any) {
@@ -1052,10 +1054,16 @@ export default function JobAutomation() {
           {displayedJobs.length === 0 ? (
             <div className="p-10 text-center border-2 border-dashed rounded-xl border-muted space-y-3">
               <Briefcase className="w-10 h-10 text-muted-foreground/60 mx-auto" />
-              <h4 className="text-base font-semibold text-foreground">No Matching Jobs to Display</h4>
+              <h4 className="text-base font-semibold text-foreground">
+                {matchedJobs.length === 0 && profile
+                  ? "No Approved Jobs Posted Yet"
+                  : "No Matching Jobs to Display"}
+              </h4>
               <p className="text-xs text-muted-foreground max-w-md mx-auto">
-                {matchedJobs.length === 0
-                  ? 'Please upload your resume in the Resume container above to compute your match percentages against platform vacancies.'
+                {!profile
+                  ? "Please upload your resume in the Resume container above to compute your match percentages against platform vacancies."
+                  : matchedJobs.length === 0
+                  ? "No active job openings have been posted to the platform yet. When recruiters post and publish vacancies, they will automatically be evaluated and matched against your resume here."
                   : `No positions found for the current ${minMatchPercentage}% adjustment threshold or "${activeJobTap}" tap filter. Try lowering the percentage bar above.`}
               </p>
               {matchedJobs.length > 0 && (

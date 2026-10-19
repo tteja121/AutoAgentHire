@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
-  Bot, Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft, Briefcase,
-  ShieldCheck, Clock, AlertTriangle, User, KeyRound,
+  Bot, Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft,
+  Clock, AlertTriangle, User, KeyRound,
   CheckCircle2, Sparkles
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -274,47 +274,6 @@ const Login = () => {
               <div className="leading-relaxed">{error}</div>
             </motion.div>
           )}
-
-          {/* Quick Demo Access Bar */}
-          <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 space-y-2">
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span className="font-semibold text-foreground flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                Demo Credentials / Quick Fill
-              </span>
-              <span>Click to auto-fill</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-[11px] px-2.5 bg-background hover:bg-primary/10 border-primary/30"
-                onClick={() => {
-                  setIdentifier("Author@auto.in");
-                  setPassword("Author@123");
-                  setError(null);
-                }}
-              >
-                <ShieldCheck className="w-3 h-3 text-purple-400 mr-1" />
-                Authorizer (AUTH-001)
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-[11px] px-2.5 bg-background hover:bg-primary/10 border-primary/30"
-                onClick={() => {
-                  setIdentifier("recruiter_alpha@alphatech.test");
-                  setPassword("Author@123");
-                  setError(null);
-                }}
-              >
-                <Briefcase className="w-3 h-3 text-blue-400 mr-1" />
-                Recruiter Demo
-              </Button>
-            </div>
-          </div>
 
           {/* Single Unified Login Form */}
           <form onSubmit={handleSubmit} className="space-y-4">

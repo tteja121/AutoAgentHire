@@ -424,28 +424,10 @@ async def apply_all_jobs(
             ).first()
 
         if not db_job:
-            try:
-                recruiter = db.query(User).filter(User.role.in_(["recruiter", "admin"])).first()
-                recruiter_id = recruiter.id if recruiter else (candidate_user.id if candidate_user else 1)
-                db_job = JobPosting(
-                    recruiter_id=recruiter_id,
-                    title=j_title,
-                    company_name=j_company,
-                    location=j_location,
-                    salary_description="$110k - $160k",
-                    description=f"AutoAgentHire verified vacancy match for {j_title} at {j_company}.",
-                    status="approved",
-                    start_date_pt=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S PDT"),
-                    final_date_pt=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S PDT"),
-                )
-                db.add(db_job)
-                db.commit()
-                db.refresh(db_job)
-            except Exception:
-                db.rollback()
-                db_job = db.query(JobPosting).first()
+            # Do not auto-generate mock jobs into the database; skip unposted vacancy
+            continue
 
-        posting_id = db_job.id if db_job else 1
+        posting_id = db_job.id
 
         # Check existing application or create new
         app_record = db.query(JobApplication).filter(
@@ -641,7 +623,9 @@ async def parse_resume(
         # 6. Fetch approved jobs from platform database for job matching
         platform_jobs: List[Dict[str, Any]] = []
         try:
-            db_jobs = db.query(JobPosting).filter(JobPosting.status == "approved").all()
+            db_jobs = db.query(JobPosting).filter(
+                JobPosting.status.in_(["approved", "active", "published"])
+            ).all()
             for j in db_jobs:
                 platform_jobs.append({
                     "id": j.id,
@@ -655,61 +639,6 @@ async def parse_resume(
                 })
         except Exception as db_err:
             print(f"[ATS] Database job fetch note: {db_err}")
-
-        # If platform database is empty or offline, provide verified technology opportunities
-        if not platform_jobs:
-            platform_jobs = [
-                {
-                    "id": "1",
-                    "title": "Senior Full Stack Engineer",
-                    "company_name": "TechNova AI",
-                    "location": "Remote (US / Global)",
-                    "job_type": "Full-time",
-                    "salary_description": "$135,000 - $165,000",
-                    "skills": "Python, React, TypeScript, FastAPI, PostgreSQL, Tailwind CSS, REST APIs",
-                    "description": "Architect and scale web applications with React UI, high-performance FastAPI backends, and PostgreSQL.",
-                },
-                {
-                    "id": "2",
-                    "title": "Senior Frontend Engineer",
-                    "company_name": "Quantum Software Labs",
-                    "location": "Remote / Hybrid",
-                    "job_type": "Full-time",
-                    "salary_description": "$125,000 - $155,000",
-                    "skills": "React, TypeScript, Next.js, Tailwind CSS, Redux, HTML, CSS",
-                    "description": "Build high-fidelity, responsive web apps with fluid animations, component systems, and clean TypeScript.",
-                },
-                {
-                    "id": "3",
-                    "title": "Backend Systems Engineer",
-                    "company_name": "Apex Data Solutions",
-                    "location": "Austin, TX (Remote)",
-                    "job_type": "Full-time",
-                    "salary_description": "$135,000 - $170,000",
-                    "skills": "Python, FastAPI, Go, PostgreSQL, Redis, Docker, Microservices",
-                    "description": "Build resilient asynchronous event-driven pipelines, caching layers, and high-throughput REST APIs.",
-                },
-                {
-                    "id": "4",
-                    "title": "DevOps & Cloud Systems Engineer",
-                    "company_name": "Nexus Cloud Systems",
-                    "location": "San Francisco, CA (Remote)",
-                    "job_type": "Full-time",
-                    "salary_description": "$140,000 - $175,000",
-                    "skills": "AWS, GCP, Kubernetes, Docker, Terraform, CI/CD, Linux",
-                    "description": "Manage multi-cloud container infrastructure, Terraform automation, and automated deployment pipelines.",
-                },
-                {
-                    "id": "5",
-                    "title": "AI & Machine Learning Engineer",
-                    "company_name": "HyperAI Dynamics",
-                    "location": "Remote",
-                    "job_type": "Full-time",
-                    "salary_description": "$150,000 - $190,000",
-                    "skills": "Python, PyTorch, TensorFlow, LLMs, NLP, Scikit-Learn, Docker",
-                    "description": "Deploy real-world LLM and Computer Vision models into production with modern ML pipelines.",
-                },
-            ]
 
         # Calculate matching jobs grounded in real vacancies and candidate experience
         matched_jobs = gemini_service.match_candidate_against_jobs(
@@ -1035,7 +964,9 @@ def generate_suitable_job_description(resume_text: str, skills: List[str], db: O
     matched_platform_jobs = []
     if db:
         try:
-            approved_jobs = db.query(JobPosting).filter(JobPosting.status == "approved").all()
+            approved_jobs = db.query(JobPosting).filter(
+                JobPosting.status.in_(["approved", "active", "published"])
+            ).all()
             for job in approved_jobs:
                 job_content = f"{job.title} {job.description} {job.requirements or ''} {job.skills or ''}".lower()
                 overlap = [s for s in skills if s in job_content]
