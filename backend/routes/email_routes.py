@@ -188,10 +188,9 @@ async def receive_inbound_email(
         # Append note to application recruiter notes
         timestamp_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         update_note = f"\n[{timestamp_str} Inbound Email from {sender_clean}]: {subject}\n{safe_text[:300]}"
-        if matched_application.recruiter_notes:
-            matched_application.recruiter_notes += update_note
-        else:
-            matched_application.recruiter_notes = update_note.strip()
+        existing_notes = str(getattr(matched_application, "recruiter_notes", "") or "")
+        new_notes = f"{existing_notes}{update_note}" if existing_notes else update_note.strip()
+        setattr(matched_application, "recruiter_notes", new_notes)
         db.commit()
 
     logger.info("[EmailInbound] %s", audit_notes)

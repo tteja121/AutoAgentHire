@@ -694,7 +694,7 @@ class JobApplication(Base):
 
     # Tracking & Review status: 'pending', 'reviewing', 'shortlisted', 'interview', 'rejected', 'hired'
     status = Column(String(50), default='pending', nullable=False, index=True)
-    recruiter_notes = Column(Text)
+    recruiter_notes: Any = Column(Text)
     match_score = Column(Float, default=0.0)
 
     # Feature 1: Email notification tracking & diagnostics

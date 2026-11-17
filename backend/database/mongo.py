@@ -15,14 +15,14 @@ try:
     from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
     PYMONGO_AVAILABLE = True
 except ImportError:
-    MongoClient = None  # type: ignore[assignment, misc]
-    Database = None  # type: ignore[assignment, misc]
-    Collection = None  # type: ignore[assignment, misc]
+    MongoClient: Any = Any  # type: ignore[assignment, misc]
+    Database: Any = Any  # type: ignore[assignment, misc]
+    Collection: Any = Any  # type: ignore[assignment, misc]
     ASCENDING = 1
     DESCENDING = -1
     TEXT = "text"
-    ConnectionFailure = Exception  # type: ignore[assignment, misc]
-    ServerSelectionTimeoutError = Exception  # type: ignore[assignment, misc]
+    ConnectionFailure: Any = Exception  # type: ignore[assignment, misc]
+    ServerSelectionTimeoutError: Any = Exception  # type: ignore[assignment, misc]
     PYMONGO_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -37,8 +37,8 @@ class MongoDBManager:
     def __init__(self, uri: Optional[str] = None, db_name: Optional[str] = None):
         self.uri = uri or DEFAULT_MONGO_URI
         self.db_name = db_name or DEFAULT_DB_NAME
-        self._client: Optional[MongoClient] = None
-        self._db: Optional[Database] = None
+        self._client: Any = None
+        self._db: Any = None
         self._connected = False
         self._last_attempt: float = 0.0
         self._cooldown_seconds: float = 60.0
@@ -135,7 +135,7 @@ class MongoDBManager:
             return False
 
     @property
-    def db(self) -> Database:
+    def db(self) -> Any:
         """Get the MongoDB database instance."""
         if not self._connected or self._db is None:
             self.connect()
@@ -143,7 +143,7 @@ class MongoDBManager:
             raise RuntimeError(f"MongoDB connection not established ({self._last_error or 'unavailable'}).")
         return self._db
 
-    def get_collection(self, name: str) -> Collection:
+    def get_collection(self, name: str) -> Any:
         """Get a collection by name."""
         return self.db[name]
 
