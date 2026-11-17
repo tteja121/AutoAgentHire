@@ -26,6 +26,7 @@ from backend.database.models_complete import User, JobApplication, AuditLog
 from backend.services.email_service import (
     validate_email_address,
     send_email,
+    send_email_detailed,
     SMTP_HOST,
     SMTP_PORT,
     SMTP_USER,
@@ -299,7 +300,7 @@ def send_test_email(
 </body>
 </html>"""
 
-    success, msg_id, err = send_email(
+    success, msg_id, err = send_email_detailed(
         to_email=target_email,
         subject=subject,
         html_content=html_content,

@@ -300,6 +300,75 @@ def _send_via_smtp(
         return False, None, f"SMTP failure: {sanitized_err}"
 
 
+def send_email_detailed(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    plain_text: Optional[str] = None,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Send an HTML/plain-text email via Resend, Brevo, SendGrid, or fallback to SMTP.
+    Returns: (success: bool, message_id: Optional[str], error_message: Optional[str])
+    """
+    clean_to = to_email.strip() if to_email else ""
+    if os.getenv("TESTING") == "true":
+        return True, "test_msg_id_123", None
+    if not validate_email_address(clean_to):
+        logger.warning("[EmailService] Attempted to send email to invalid address: %s", clean_to)
+        return False, None, "Invalid recipient email address"
+
+    last_error: Optional[str] = None
+
+    # 1. Try Resend HTTP API if configured
+    resend_key = os.getenv("RESEND_API_KEY", RESEND_API_KEY).strip()
+    if resend_key:
+        success, msg_id, err = _send_via_resend(clean_to, subject, html_content, plain_text)
+        if success:
+            return True, msg_id, None
+        last_error = f"Resend: {err}"
+        logger.warning("[EmailService] Resend failed (%s), attempting other providers...", err)
+
+    # 2. Try Brevo HTTP API if configured
+    brevo_key = os.getenv("BREVO_API_KEY", BREVO_API_KEY).strip()
+    if brevo_key:
+        success, msg_id, err = _send_via_brevo(clean_to, subject, html_content, plain_text)
+        if success:
+            return True, msg_id, None
+        last_error = f"Brevo: {err}"
+        logger.warning("[EmailService] Brevo failed (%s), attempting other providers...", err)
+
+    # 3. Try SendGrid HTTP API if configured
+    sg_key = os.getenv("SENDGRID_API_KEY", SENDGRID_API_KEY).strip()
+    if sg_key:
+        success, msg_id, err = _send_via_sendgrid(clean_to, subject, html_content, plain_text)
+        if success:
+            return True, msg_id, None
+        last_error = f"SendGrid: {err}"
+        logger.warning("[EmailService] SendGrid failed (%s), attempting other providers...", err)
+
+    # 4. Try SMTP fallback (Gmail App Password, custom SMTP with port 587/465 retry)
+    smtp_user = os.getenv("SMTP_USER", SMTP_USER).strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", SMTP_PASSWORD).replace(" ", "").strip()
+    if smtp_user and smtp_password:
+        success, msg_id, err = _send_via_smtp(clean_to, subject, html_content, plain_text)
+        if success:
+            return True, msg_id, None
+        last_error = f"SMTP: {err}"
+        logger.warning(
+            "[EmailService] SMTP delivery failed: %s. Note: Render free tier blocks outbound SMTP ports 25, 465, and 587. "
+            "Configure RESEND_API_KEY or BREVO_API_KEY on Render to send emails via HTTPS.",
+            err,
+        )
+
+    err_summary = last_error or "No configured email delivery provider succeeded or credentials missing."
+    logger.warning(
+        "[EmailService] All configured email providers failed for %s: %s",
+        clean_to,
+        err_summary,
+    )
+    return False, None, err_summary
+
+
 def send_email(
     to_email: str,
     subject: str,
@@ -307,56 +376,8 @@ def send_email(
     plain_text: Optional[str] = None,
 ) -> bool:
     """Send an HTML/plain-text email via Resend, Brevo, SendGrid, or fallback to SMTP."""
-    clean_to = to_email.strip() if to_email else ""
-    if os.getenv("TESTING") == "true":
-        return True
-    if not validate_email_address(clean_to):
-        logger.warning("[EmailService] Attempted to send email to invalid address: %s", clean_to)
-        return False
-
-    # 1. Try Resend HTTP API if configured
-    resend_key = os.getenv("RESEND_API_KEY", RESEND_API_KEY).strip()
-    if resend_key:
-        success, _, err = _send_via_resend(clean_to, subject, html_content, plain_text)
-        if success:
-            return True
-        logger.warning("[EmailService] Resend failed (%s), attempting other providers...", err)
-
-    # 2. Try Brevo HTTP API if configured
-    brevo_key = os.getenv("BREVO_API_KEY", BREVO_API_KEY).strip()
-    if brevo_key:
-        success, _, err = _send_via_brevo(clean_to, subject, html_content, plain_text)
-        if success:
-            return True
-        logger.warning("[EmailService] Brevo failed (%s), attempting other providers...", err)
-
-    # 3. Try SendGrid HTTP API if configured
-    sg_key = os.getenv("SENDGRID_API_KEY", SENDGRID_API_KEY).strip()
-    if sg_key:
-        success, _, err = _send_via_sendgrid(clean_to, subject, html_content, plain_text)
-        if success:
-            return True
-        logger.warning("[EmailService] SendGrid failed (%s), attempting other providers...", err)
-
-    # 4. Try SMTP fallback (Gmail App Password, custom SMTP with port 587/465 retry)
-    smtp_user = os.getenv("SMTP_USER", SMTP_USER).strip()
-    smtp_password = os.getenv("SMTP_PASSWORD", SMTP_PASSWORD).replace(" ", "").strip()
-    if smtp_user and smtp_password:
-        success, _, err = _send_via_smtp(clean_to, subject, html_content, plain_text)
-        if success:
-            return True
-        logger.warning(
-            "[EmailService] SMTP delivery failed: %s. Note: Render free tier blocks outbound SMTP ports 25, 465, and 587. "
-            "Configure RESEND_API_KEY or BREVO_API_KEY on Render to send emails via HTTPS.",
-            err,
-        )
-
-    logger.warning(
-        "[EmailService] All configured email providers failed for %s. "
-        "To enable production email delivery on Render free tier, set RESEND_API_KEY or BREVO_API_KEY.",
-        clean_to,
-    )
-    return False
+    success, _, _ = send_email_detailed(to_email, subject, html_content, plain_text)
+    return success
 
 
 def send_candidate_application_thank_you_email(
