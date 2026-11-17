@@ -31,11 +31,11 @@ except ImportError:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class UserRepository:
-    """Repository for User operations"""
+    """Repository for User operations with unified MongoDB Atlas & SQLite support"""
     
     @staticmethod
     def create(db: Session, email: str, hashed_password: str, **kwargs) -> User:
-        """Create a new user"""
+        """Create a new user across SQLite and MongoDB Atlas"""
         clean_email = email.strip().lower() if email else ""
         user = User(
             email=clean_email,
@@ -43,22 +43,127 @@ class UserRepository:
             **kwargs
         )
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        try:
+            db.commit()
+            db.refresh(user)
+        except Exception:
+            db.rollback()
+            raise
+
+        # Mirror immediately to MongoDB Atlas users collection
+        try:
+            from backend.database.mongo import mongo_manager
+            if mongo_manager._is_available():
+                doc = {
+                    "id": user.id,
+                    "uuid": getattr(user, "uuid", None),
+                    "email": clean_email,
+                    "hashed_password": hashed_password,
+                    "full_name": getattr(user, "full_name", None),
+                    "first_name": getattr(user, "first_name", None),
+                    "last_name": getattr(user, "last_name", None),
+                    "role": getattr(user, "role", "candidate"),
+                    "company_name": getattr(user, "company_name", None),
+                    "company_logo_url": getattr(user, "company_logo_url", None),
+                    "phone": getattr(user, "phone", None),
+                    "location": getattr(user, "location", None),
+                    "is_active": getattr(user, "is_active", True),
+                    "is_verified": getattr(user, "is_verified", True),
+                    "approval_status": getattr(user, "approval_status", "approved"),
+                    "custom_user_id": getattr(user, "custom_user_id", None),
+                    "created_at": user.created_at.isoformat() if getattr(user, "created_at", None) else datetime.now(timezone.utc).isoformat(),
+                }
+                mongo_manager.save_user(doc)
+        except Exception as m_err:
+            import logging
+            logging.getLogger(__name__).warning("Non-fatal: failed to persist user to MongoDB: %s", m_err)
+
         return user
     
     @staticmethod
     def get_by_id(db: Session, user_id: int) -> Optional[User]:
-        """Get user by ID"""
-        return db.query(User).filter(User.id == user_id).first()
+        """Get user by ID, checking MongoDB Atlas first if connected"""
+        # 1. Check local session
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user:
+                return user
+        except Exception:
+            pass
+
+        # 2. Check MongoDB Atlas
+        try:
+            from backend.database.mongo import mongo_manager
+            if mongo_manager._is_available():
+                m_user = mongo_manager.find_user_by_id(user_id)
+                if m_user:
+                    email = m_user.get("email")
+                    if email:
+                        return UserRepository.get_by_email(db, email=email)
+        except Exception:
+            pass
+
+        return None
     
     @staticmethod
     def get_by_email(db: Session, email: str) -> Optional[User]:
-        """Get user by email (case-insensitive)"""
+        """Get user by email (case-insensitive), checking MongoDB Atlas first if connected"""
         if not email:
             return None
         clean_email = email.strip().lower()
-        return db.query(User).filter(func.lower(User.email) == clean_email).first()
+
+        # 1. Check MongoDB Atlas persistent store first
+        try:
+            from backend.database.mongo import mongo_manager
+            if mongo_manager._is_available():
+                m_user = mongo_manager.find_user_by_email(clean_email)
+                if m_user:
+                    # Sync or restore to local SQLite session so ORM models and relationships work
+                    try:
+                        local_user = db.query(User).filter(func.lower(User.email) == clean_email).first()
+                        if not local_user:
+                            local_user = User(
+                                id=m_user.get("id"),
+                                email=clean_email,
+                                hashed_password=m_user.get("hashed_password") or "restored_hash",
+                                full_name=m_user.get("full_name"),
+                                first_name=m_user.get("first_name"),
+                                last_name=m_user.get("last_name"),
+                                role=m_user.get("role", "candidate"),
+                                company_name=m_user.get("company_name"),
+                                company_logo_url=m_user.get("company_logo_url"),
+                                phone=m_user.get("phone"),
+                                location=m_user.get("location"),
+                                is_active=m_user.get("is_active", True),
+                                is_verified=m_user.get("is_verified", True),
+                                approval_status=m_user.get("approval_status", "approved"),
+                                custom_user_id=m_user.get("custom_user_id"),
+                            )
+                            db.add(local_user)
+                            try:
+                                db.commit()
+                                db.refresh(local_user)
+                            except Exception:
+                                db.rollback()
+                        return local_user
+                    except Exception as db_err:
+                        # If SQLite error occurs, ensure tables exist and retry
+                        if "no such table" in str(db_err).lower():
+                            from backend.database.connection import init_db
+                            init_db()
+                            return db.query(User).filter(func.lower(User.email) == clean_email).first()
+        except Exception:
+            pass
+
+        # 2. Local database fallback
+        try:
+            return db.query(User).filter(func.lower(User.email) == clean_email).first()
+        except Exception as local_err:
+            if "no such table" in str(local_err).lower():
+                from backend.database.connection import init_db
+                init_db()
+                return db.query(User).filter(func.lower(User.email) == clean_email).first()
+            raise
     
     @staticmethod
     def get_by_uuid(db: Session, uuid: str) -> Optional[User]:
@@ -67,22 +172,60 @@ class UserRepository:
 
     @staticmethod
     def get_by_identifier(db: Session, identifier: str) -> Optional[User]:
-        """Get user by email, custom_user_id, or UUID"""
+        """Get user by email, custom_user_id, or UUID across MongoDB and SQLite"""
         identifier_clean = identifier.strip()
-        user = db.query(User).filter(User.email.ilike(identifier_clean)).first()
-        if user:
-            return user
-        if hasattr(User, 'custom_user_id'):
-            user = db.query(User).filter(User.custom_user_id.ilike(identifier_clean)).first()
+
+        # Check MongoDB Atlas first
+        try:
+            from backend.database.mongo import mongo_manager
+            if mongo_manager._is_available():
+                m_user = mongo_manager.find_user_by_identifier(identifier_clean)
+                if m_user:
+                    email = m_user.get("email")
+                    if email:
+                        return UserRepository.get_by_email(db, email=email)
+        except Exception:
+            pass
+
+        try:
+            user = db.query(User).filter(User.email.ilike(identifier_clean)).first()
             if user:
                 return user
-        return db.query(User).filter(User.uuid == identifier_clean).first()
+            if hasattr(User, 'custom_user_id'):
+                user = db.query(User).filter(User.custom_user_id.ilike(identifier_clean)).first()
+                if user:
+                    return user
+            return db.query(User).filter(User.uuid == identifier_clean).first()
+        except Exception as id_err:
+            if "no such table" in str(id_err).lower():
+                from backend.database.connection import init_db
+                init_db()
+                return db.query(User).filter(User.email.ilike(identifier_clean)).first()
+            raise
     
     @staticmethod
     def update(db: Session, user_id: int, **kwargs) -> Optional[User]:
-        """Update user"""
+        """Update user in SQLite and synchronize to MongoDB Atlas"""
         user = db.query(User).filter(User.id == user_id).first()
         if user:
+            for key, value in kwargs.items():
+                if hasattr(user, key):
+                    setattr(user, key, value)
+            db.commit()
+            db.refresh(user)
+
+            # Mirror updates to MongoDB Atlas
+            try:
+                from backend.database.mongo import mongo_manager
+                if mongo_manager._is_available() and user.email:
+                    update_dict = {k: v for k, v in kwargs.items() if not k.startswith("_")}
+                    mongo_manager.save_user({
+                        "id": user.id,
+                        "email": user.email,
+                        **update_dict
+                    })
+            except Exception:
+                pass
             for key, value in kwargs.items():
                 if hasattr(user, key):
                     setattr(user, key, value)

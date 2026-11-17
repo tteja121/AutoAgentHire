@@ -41,10 +41,16 @@ class MongoDBManager:
         self._db: Optional[Database] = None
         self._connected = False
         self._last_attempt: float = 0.0
-        self._cooldown_seconds: float = 120.0
+        self._cooldown_seconds: float = 60.0
         self._failure_logged = False
         self._last_error: Optional[str] = None
         self._indexes_ensured = False
+
+    def get_uri(self) -> str:
+        """Resolve MongoDB URI from instance setting or environment."""
+        if self.uri:
+            return self.uri
+        return os.getenv("MONGODB_URI", "").strip()
 
     def connect(self) -> bool:
         """Initialize connection pool to MongoDB Atlas with circuit-breaker protection."""
@@ -57,13 +63,14 @@ class MongoDBManager:
         if self._connected and self._client and self._db is not None:
             return True
 
-        if not self.uri:
+        current_uri = self.get_uri()
+        if not current_uri:
             if not self._failure_logged:
-                logger.info("[MongoDB] MONGODB_URI not configured — document store disabled (using primary SQLite database).")
+                logger.info("[MongoDB] MONGODB_URI not configured — operating on local database.")
                 self._failure_logged = True
             return False
 
-
+        self.uri = current_uri
         now = time.time()
         # Cooldown guard: avoid repeating blocking TLS/handshake attempts during requests
         if not self._connected and (now - self._last_attempt) < self._cooldown_seconds:
@@ -395,6 +402,143 @@ class MongoDBManager:
         if not self._is_available():
             return []
         return list(self.db["audit_logs"].find(filter_query or {}, {"_id": 0}).sort("timestamp", DESCENDING).limit(limit))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Native MongoDB CRUD Operations for Unified Persistence
+    # ─────────────────────────────────────────────────────────────────────────
+    def find_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Find user by email case-insensitively in MongoDB users collection."""
+        if not self._is_available():
+            return None
+        import re
+        clean_email = email.strip()
+        user_doc = self.db["users"].find_one({
+            "email": {"$regex": f"^{re.escape(clean_email)}$", "$options": "i"}
+        })
+        if user_doc:
+            user_doc.pop("_id", None)
+        return user_doc
+
+    def find_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Find user by numeric ID in MongoDB users collection."""
+        if not self._is_available():
+            return None
+        user_doc = self.db["users"].find_one({"id": user_id})
+        if user_doc:
+            user_doc.pop("_id", None)
+        return user_doc
+
+    def find_user_by_identifier(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Find user by email, custom_user_id, or uuid in MongoDB users collection."""
+        if not self._is_available():
+            return None
+        import re
+        clean_id = identifier.strip()
+        user_doc = self.db["users"].find_one({
+            "$or": [
+                {"email": {"$regex": f"^{re.escape(clean_id)}$", "$options": "i"}},
+                {"custom_user_id": {"$regex": f"^{re.escape(clean_id)}$", "$options": "i"}},
+                {"uuid": clean_id},
+            ]
+        })
+        if user_doc:
+            user_doc.pop("_id", None)
+        return user_doc
+
+    def save_user(self, user_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Save or update user document in MongoDB Atlas users collection."""
+        if not self._is_available():
+            return user_dict
+        import re
+        email = str(user_dict.get("email", "")).strip().lower()
+        if not email:
+            return user_dict
+
+        doc = dict(user_dict)
+        doc.pop("_id", None)
+        doc["email"] = email
+        doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if "created_at" not in doc or not doc["created_at"]:
+            doc["created_at"] = datetime.now(timezone.utc).isoformat()
+
+        # If numeric id not provided, auto-increment based on current highest id
+        if "id" not in doc or doc["id"] is None:
+            last = self.db["users"].find_one(sort=[("id", DESCENDING)])
+            doc["id"] = (last.get("id", 0) + 1) if (last and last.get("id")) else 1
+
+        self.db["users"].update_one(
+            {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+            {"$set": doc},
+            upsert=True,
+        )
+        return doc
+
+    def record_audit_log(self, log_dict: Dict[str, Any]) -> bool:
+        """Insert audit log entry into MongoDB audit_logs collection."""
+        if not self._is_available():
+            return False
+        doc = dict(log_dict)
+        doc.pop("_id", None)
+        if "timestamp" not in doc or not doc["timestamp"]:
+            doc["timestamp"] = datetime.now(timezone.utc).isoformat()
+        self.db["audit_logs"].insert_one(doc)
+        return True
+
+    def save_application(self, app_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Save or update application in MongoDB job_candidate_applications collection."""
+        if not self._is_available():
+            return app_dict
+        doc = dict(app_dict)
+        doc.pop("_id", None)
+        doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+        app_id = doc.get("id")
+        if app_id:
+            self.db["job_candidate_applications"].update_one({"id": app_id}, {"$set": doc}, upsert=True)
+        else:
+            self.db["job_candidate_applications"].insert_one(doc)
+        return doc
+
+    def save_resume(self, resume_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Save or update resume in MongoDB resumes collection."""
+        if not self._is_available():
+            return resume_dict
+        doc = dict(resume_dict)
+        doc.pop("_id", None)
+        doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+        res_id = doc.get("id")
+        if res_id:
+            self.db["resumes"].update_one({"id": res_id}, {"$set": doc}, upsert=True)
+        else:
+            self.db["resumes"].insert_one(doc)
+        return doc
+
+    def save_practice_session(self, session_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Save or update practice session in MongoDB practice_sessions collection."""
+        if not self._is_available():
+            return session_dict
+        doc = dict(session_dict)
+        doc.pop("_id", None)
+        doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+        sess_id = doc.get("id")
+        if sess_id:
+            self.db["practice_sessions"].update_one({"id": sess_id}, {"$set": doc}, upsert=True)
+        else:
+            self.db["practice_sessions"].insert_one(doc)
+        return doc
+
+    def save_saved_job(self, job_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Save or update saved job in MongoDB user_saved_jobs collection."""
+        if not self._is_available():
+            return job_dict
+        doc = dict(job_dict)
+        doc.pop("_id", None)
+        doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self.db["user_saved_jobs"].update_one(
+            {"user_id": doc.get("user_id"), "job_id": doc.get("job_id")},
+            {"$set": doc},
+            upsert=True
+        )
+        return doc
 
 
 # Global singleton manager instance

@@ -98,10 +98,10 @@ class User(Base):
     last_application_reset = Column(Date)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    last_login = Column(DateTime(timezone=True))
-    deleted_at = Column(DateTime(timezone=True))
+    created_at: Any = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Any = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_login: Any = Column(DateTime(timezone=True))
+    deleted_at: Any = Column(DateTime(timezone=True))
     
     # Relationships
     resumes = relationship("Resume", back_populates="user", cascade="all, delete-orphan")

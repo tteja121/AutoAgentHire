@@ -12,7 +12,12 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Header
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
+try:
+    import email_validator  # noqa: F401
+    from pydantic import EmailStr
+except ImportError:
+    EmailStr = str  # type: ignore
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user, get_current_user_optional

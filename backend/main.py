@@ -56,6 +56,7 @@ from backend.routes.email_routes import router as email_router, admin_email_rout
 from backend.routes.practice_routes import router as practice_router
 from backend.database.mongo import mongo_manager
 from backend.database.connection import init_db, get_db
+from backend.database.models_complete import User
 
 # Heavy agent/ML routes — imported lazily so a missing dep doesn't break startup
 agent_router = None
@@ -95,16 +96,39 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[WARN] Database initialization failed; continuing startup: {e}")
 
-    # Initialize MongoDB Atlas connection (optional document store)
+    # Initialize MongoDB Atlas connection
     if "unittest" not in sys.modules and os.getenv("TESTING") != "true":
         try:
             mongo_ok = await asyncio.wait_for(asyncio.to_thread(mongo_manager.connect), timeout=10.0)
             if mongo_ok:
                 print("✓ MongoDB Atlas connected successfully")
+                try:
+                    from backend.database.connection import SessionLocal
+                    from sqlalchemy import func
+                    with SessionLocal() as db_session:
+                        for m_doc in mongo_manager.get_users():
+                            email = m_doc.get("email")
+                            if email:
+                                existing = db_session.query(User).filter(func.lower(User.email) == email.lower()).first()
+                                if not existing:
+                                    db_session.add(User(
+                                        id=m_doc.get("id"),
+                                        email=email,
+                                        hashed_password=m_doc.get("hashed_password") or "restored_hash",
+                                        full_name=m_doc.get("full_name"),
+                                        role=m_doc.get("role", "candidate"),
+                                        company_name=m_doc.get("company_name"),
+                                        is_active=m_doc.get("is_active", True),
+                                        is_verified=m_doc.get("is_verified", True),
+                                        custom_user_id=m_doc.get("custom_user_id"),
+                                    ))
+                        db_session.commit()
+                except Exception as sync_err:
+                    print(f"ℹ Startup MongoDB sync note: {sync_err}")
             else:
-                print("ℹ Operating on primary SQLite database (MongoDB Atlas optional mirror offline)")
+                print("ℹ Operating on local database (MongoDB Atlas offline or unconfigured)")
         except asyncio.TimeoutError:
-            print("ℹ MongoDB Atlas connection timed out; operating on primary SQLite database")
+            print("ℹ MongoDB Atlas connection timed out; operating on local database")
         except Exception as e:
             print(f"ℹ MongoDB Atlas note: {e}")
 

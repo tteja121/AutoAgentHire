@@ -991,7 +991,7 @@ def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
 
         # 5. Non-fatal audit log & last_login recording
         try:
-            user.last_login = datetime.now(timezone.utc)
+            setattr(user, "last_login", datetime.now(timezone.utc))
             login_log = AuditLog(
                 user_id=user_id,
                 performed_by_email=user_email,

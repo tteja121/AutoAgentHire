@@ -136,9 +136,21 @@ def get_current_user(
                         is_active=m_doc.get("is_active", True),
                         is_verified=m_doc.get("is_verified", True),
                     )
-                    db.add(user)
-                    db.commit()
-                    db.refresh(user)
+                    try:
+                        db.add(user)
+                        db.commit()
+                        db.refresh(user)
+                    except Exception as ins_err:
+                        db.rollback()
+                        if "no such table" in str(ins_err).lower():
+                            from backend.database.connection import init_db
+                            init_db()
+                            try:
+                                db.add(user)
+                                db.commit()
+                                db.refresh(user)
+                            except Exception:
+                                pass
         except Exception:
             pass
 
