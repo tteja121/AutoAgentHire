@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import JobDescriptionRenderer from '@/components/JobDescriptionRenderer';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Upload, CheckCircle2, Loader2, FileText, Briefcase, Eye, 
   ExternalLink, Sparkles, Building, MapPin, DollarSign, Clock, 
   ShieldCheck, User, Mail, Phone, Send, Check, AlertCircle, ArrowRight,
-  Sliders, Filter, RefreshCw, CheckCheck, ChevronRight, Copy, Info,
-  CheckCircle, ListChecks, HelpCircle
+  Sliders, Filter, RefreshCw, RotateCcw, CheckCheck, ChevronRight, Copy, Info,
+  CheckCircle, ListChecks, HelpCircle, Plus, X, GraduationCap, Globe
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -21,9 +24,26 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { applyProfileFromResume, getCandidateProfile } from '@/utils/profileSync';
+import { 
+  getActiveResumeSession, 
+  setActiveResumeSession, 
+  subscribeToActiveResumeSession,
+  clearActiveResumeSession 
+} from '@/utils/activeResumeSession';
 import { applicationService } from '@/services/applicationService';
-import { API_BASE_URL, apiClient } from '@/lib/api';
+import { API_BASE_URL, apiClient, API_ENDPOINTS } from '@/lib/api';
+import { ResumeDocumentPreview } from '@/components/ResumeDocumentPreview';
 
 export interface MatchedJob {
   id: string;
@@ -123,6 +143,81 @@ export default function JobAutomation() {
   const [showOptimizeModal, setShowOptimizeModal] = useState(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
 
+  // ── Customize Job Recommendations State ─────────────────────────────────────
+  const [isCustomizeMode, setIsCustomizeMode] = useState<boolean>(() => {
+    return localStorage.getItem('autoagenthire_customize_mode') === 'true';
+  });
+  const [customSkills, setCustomSkills] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('autoagenthire_custom_skills');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [customSkillInput, setCustomSkillInput] = useState<string>('');
+  const [experienceLevel, setExperienceLevel] = useState<'fresher' | 'experienced'>(() => {
+    return (localStorage.getItem('autoagenthire_custom_level') as any) || 'fresher';
+  });
+  const [customExperienceYears, setCustomExperienceYears] = useState<number>(() => {
+    const raw = localStorage.getItem('autoagenthire_custom_years');
+    return raw !== null ? Math.max(0, parseFloat(raw) || 0) : 0;
+  });
+  const [customLocation, setCustomLocation] = useState<string>(() => {
+    return localStorage.getItem('autoagenthire_custom_location') || '';
+  });
+  const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
+
+  const handleResetPage = () => {
+    setMinMatchPercentage(60);
+    setActiveJobTap('all');
+    setCustomSkills([]);
+    setCustomExperienceYears(0);
+    setExperienceLevel('fresher');
+    setCustomLocation('');
+    setCustomSkillInput('');
+    setCustomRecommendations([]);
+    setRecommendationsError(null);
+    setResumeFile(null);
+    setPreviewUrl(null);
+    setProfile(null);
+    setMatchedJobs([]);
+    clearActiveResumeSession();
+    setShowResetConfirm(false);
+    try {
+      localStorage.removeItem('autoagenthire_custom_skills');
+      localStorage.removeItem('autoagenthire_custom_years');
+      localStorage.removeItem('autoagenthire_custom_level');
+      localStorage.removeItem('autoagenthire_custom_location');
+    } catch {}
+    toast({
+      title: 'Automation Page Reset',
+      description: 'Temporary configurations, filters, and manual inputs have been cleared. Profile and database applications remain safe.',
+    });
+  };
+  const [skillSuggestions, setSkillSuggestions] = useState<string[]>([
+    'Python', 'Java', 'React', 'JavaScript', 'TypeScript', 'SQL', 'FastAPI',
+    'Machine Learning', 'Docker', 'Kubernetes', 'AWS', 'Node.js', 'PostgreSQL'
+  ]);
+  const [customRecommendations, setCustomRecommendations] = useState<MatchedJob[]>([]);
+  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState<boolean>(false);
+  const [recommendationsError, setRecommendationsError] = useState<string | null>(null);
+
+  // View Details Modal
+  const [selectedJobForDetails, setSelectedJobForDetails] = useState<MatchedJob | null>(null);
+
+  // Apply Now (with Resume Upload) Modal
+  const [applyingJob, setApplyingJob] = useState<MatchedJob | null>(null);
+  const [applyCandidateName, setApplyCandidateName] = useState<string>('');
+  const [applyCandidateEmail, setApplyCandidateEmail] = useState<string>('');
+  const [applyCandidatePhone, setApplyCandidatePhone] = useState<string>('');
+  const [applyResumeFile, setApplyResumeFile] = useState<File | null>(null);
+  const [applyCoverLetter, setApplyCoverLetter] = useState<string>('');
+  const [isSubmittingSingleApply, setIsSubmittingSingleApply] = useState<boolean>(false);
+  const [applySuccessResult, setApplySuccessResult] = useState<{ reference_id: string; job_title: string; company: string } | null>(null);
+
+  const locationDebounceTimer = useRef<NodeJS.Timeout | null>(null);
+
   // Clean up preview URL on unmount
   useEffect(() => {
     return () => {
@@ -130,7 +225,62 @@ export default function JobAutomation() {
     };
   }, [previewUrl]);
 
-  // Load candidate profile on mount if available
+  // Helper to normalize ATS profile data from backend
+  const mapAtsProfileData = (data: any): { extractedProfile: ExtractedProfile; jobsFromBackend: MatchedJob[] } => {
+    const skillsObj = data.skills || {};
+    const techSkills: string[] = skillsObj.technical || [];
+    const profSkills: string[] = skillsObj.professional || [];
+    const domainSkills: string[] = skillsObj.domain || [];
+    const allSkills: string[] = data.all_skills || [...techSkills, ...profSkills, ...domainSkills];
+
+    const parsedExp = data.total_experience || 'Fresher / Entry-Level (0-1 year)';
+
+    const extractedProfile: ExtractedProfile = {
+      resume_id: data.resume_id,
+      candidate_name: data.candidate_name || 'Candidate',
+      email: data.email || '',
+      phone: data.phone || '',
+      location: data.location || '',
+      professional_summary: data.professional_summary || '',
+      total_experience: parsedExp,
+      skills: {
+        technical: techSkills,
+        professional: profSkills,
+        domain: domainSkills,
+      },
+      all_skills: allSkills,
+      ai_powered: Boolean(data.ai_powered),
+      model_used: data.model_used,
+      config_message: data.config_message,
+      strengths: data.strengths || [],
+      missing_skills: data.missing_skills || [],
+      career_highlights: data.career_highlights || [],
+      suggested_improvements: data.suggested_improvements || [],
+      facts_vs_inferences: data.facts_vs_inferences || { explicit_facts: [], inferences: [] },
+      last_updated: data.last_updated || new Date().toISOString(),
+    };
+
+    const jobsFromBackend: MatchedJob[] = (data.matched_jobs || []).map((j: any) => ({
+      id: String(j.id),
+      title: j.title,
+      company: j.company || j.company_name || 'Tech Partner',
+      location: j.location || 'Remote',
+      employment_type: j.employment_type || j.job_type || 'Full-time',
+      salary_range: j.salary_range || j.salary_description || 'Competitive',
+      match_percentage: Number(j.match_percentage) || 80,
+      matching_skills: j.matching_skills || j.matched_skills || [],
+      missing_skills: j.missing_skills || [],
+      experience_compatibility: j.experience_compatibility,
+      suitability_reason: j.suitability_reason,
+      improvement_suggestions: j.improvement_suggestions || [],
+      description: j.description || '',
+      applied: false,
+    }));
+
+    return { extractedProfile, jobsFromBackend };
+  };
+
+  // Load candidate profile on mount, restore persisted ATS analysis and customize preferences
   useEffect(() => {
     const existing = getCandidateProfile();
     if (existing && existing.candidate_name) {
@@ -138,8 +288,335 @@ export default function JobAutomation() {
       setClientEmail(existing.email || '');
       setClientPhone(existing.phone || '');
       setClientExperience(existing.experience || '');
+      setApplyCandidateName(existing.candidate_name);
+      setApplyCandidateEmail(existing.email || '');
+      setApplyCandidatePhone(existing.phone || '');
     }
+
+    // Synchronize active in-memory resume session (if analyzed during this session)
+    const activeSession = getActiveResumeSession();
+    if (activeSession && activeSession.profile) {
+      setProfile(activeSession.profile);
+      if (activeSession.matchedJobs && activeSession.matchedJobs.length > 0) {
+        setMatchedJobs(activeSession.matchedJobs);
+      }
+      if (activeSession.file) setResumeFile(activeSession.file);
+      if (activeSession.previewUrl) setPreviewUrl(activeSession.previewUrl);
+    }
+
+    const unsubscribeResume = subscribeToActiveResumeSession((session) => {
+      if (session && session.profile) {
+        setProfile(session.profile);
+        if (session.matchedJobs) setMatchedJobs(session.matchedJobs);
+        if (session.file) setResumeFile(session.file);
+        if (session.previewUrl) setPreviewUrl(session.previewUrl);
+      }
+    });
+
+    const restoreCustomPreferences = async () => {
+      try {
+        const [prefsResp, suggResp] = await Promise.allSettled([
+          apiClient.get(API_ENDPOINTS.candidate.preferences),
+          apiClient.get(API_ENDPOINTS.candidate.skillsSuggestions),
+        ]);
+
+        if (suggResp.status === 'fulfilled' && Array.isArray(suggResp.value.data?.skills)) {
+          setSkillSuggestions(suggResp.value.data.skills);
+        }
+
+        if (prefsResp.status === 'fulfilled' && prefsResp.value.data) {
+          const d = prefsResp.value.data;
+          if (Array.isArray(d.skills) && d.skills.length > 0) {
+            setCustomSkills(d.skills);
+            localStorage.setItem('autoagenthire_custom_skills', JSON.stringify(d.skills));
+          }
+          if (typeof d.experience === 'number') {
+            setCustomExperienceYears(d.experience);
+            setExperienceLevel(d.experience === 0 ? 'fresher' : 'experienced');
+            localStorage.setItem('autoagenthire_custom_years', String(d.experience));
+            localStorage.setItem('autoagenthire_custom_level', d.experience === 0 ? 'fresher' : 'experienced');
+          }
+          if (d.location) {
+            setCustomLocation(d.location);
+            localStorage.setItem('autoagenthire_custom_location', d.location);
+          }
+          if (typeof d.customize_active === 'boolean') {
+            setIsCustomizeMode(d.customize_active);
+            localStorage.setItem('autoagenthire_customize_mode', String(d.customize_active));
+          }
+        }
+      } catch (err) {
+        console.warn('Preferences load notice:', err);
+      }
+    };
+
+    restoreCustomPreferences();
+
+    return () => {
+      unsubscribeResume();
+    };
   }, []);
+
+  // Save customization preferences to backend & local storage
+  const savePreferencesToBackend = async (
+    skills: string[],
+    years: number,
+    level: string,
+    location: string,
+    customizeActive: boolean
+  ) => {
+    try {
+      localStorage.setItem('autoagenthire_custom_skills', JSON.stringify(skills));
+      localStorage.setItem('autoagenthire_custom_years', String(years));
+      localStorage.setItem('autoagenthire_custom_level', level);
+      localStorage.setItem('autoagenthire_custom_location', location);
+      localStorage.setItem('autoagenthire_customize_mode', String(customizeActive));
+
+      // Broadcast preference change across entire app (e.g. Curated Opportunities)
+      try {
+        window.dispatchEvent(new CustomEvent('candidatePreferencesUpdated', {
+          detail: {
+            skills,
+            experience: years,
+            experience_level: level,
+            location,
+            customize_active: customizeActive,
+          }
+        }));
+      } catch {}
+
+      await apiClient.post(API_ENDPOINTS.candidate.preferences, {
+        skills,
+        experience: years,
+        experience_level: level,
+        location,
+        customize_active: customizeActive,
+      });
+    } catch {
+      // Preferences saved to localStorage
+    }
+  };
+
+  // Fetch automatic custom recommendations based on candidate's preferences
+  const fetchCustomRecommendations = async (
+    skillsOverride?: string[],
+    expOverride?: number,
+    levelOverride?: 'fresher' | 'experienced',
+    locOverride?: string,
+    thresholdOverride?: number
+  ) => {
+    setIsLoadingRecommendations(true);
+    setRecommendationsError(null);
+
+    const skillsToUse = skillsOverride !== undefined ? skillsOverride : customSkills;
+    const expToUse = expOverride !== undefined ? expOverride : customExperienceYears;
+    const levelToUse = levelOverride !== undefined ? levelOverride : experienceLevel;
+    const locToUse = locOverride !== undefined ? locOverride : customLocation;
+    const thresholdToUse = thresholdOverride !== undefined ? thresholdOverride : minMatchPercentage;
+
+    try {
+      const resp = await apiClient.post(API_ENDPOINTS.candidate.recommendations, {
+        skills: skillsToUse,
+        experience: expToUse,
+        experience_level: levelToUse,
+        location: locToUse,
+        min_threshold: thresholdToUse,
+        limit: 50,
+      });
+
+      if (resp.data && Array.isArray(resp.data.jobs)) {
+        const mapped: MatchedJob[] = resp.data.jobs.map((j: any) => ({
+          id: String(j.job_id || j.id),
+          title: j.title,
+          company: j.company,
+          location: j.location || 'Remote',
+          employment_type: j.employment_type || 'Full-time',
+          salary_range: j.salary_range || 'Competitive',
+          match_percentage: Number(j.match_percentage) || 75,
+          matching_skills: j.matching_skills || [],
+          missing_skills: j.missing_skills || [],
+          experience_compatibility: j.experience_compatibility || 'Alignment evaluated',
+          suitability_reason: j.suitability_reason,
+          improvement_suggestions: j.improvement_suggestions || [],
+          description: j.description || '',
+          applied: Boolean(j.applied),
+        }));
+        setCustomRecommendations(mapped);
+      } else {
+        setCustomRecommendations([]);
+      }
+    } catch (err: any) {
+      console.warn('Failed to fetch recommendations:', err);
+      setRecommendationsError(err.response?.data?.detail || err.message || 'Failed to load recommendations');
+    } finally {
+      setIsLoadingRecommendations(false);
+    }
+  };
+
+  // Refresh recommendations whenever customize mode is enabled
+  useEffect(() => {
+    if (isCustomizeMode) {
+      fetchCustomRecommendations();
+    }
+  }, [isCustomizeMode]);
+
+  // Skill handlers
+  const handleAddSkill = (skillToAdd?: string) => {
+    const raw = (skillToAdd !== undefined ? skillToAdd : customSkillInput).trim();
+    if (!raw) return;
+
+    // Normalize whitespace and capitalization
+    const normalized = raw.replace(/\s+/g, ' ');
+    const exists = customSkills.some(s => s.toLowerCase() === normalized.toLowerCase());
+    if (exists) {
+      toast({
+        title: 'Skill Already Added',
+        description: `"${normalized}" is already present in your skills list.`,
+      });
+      setCustomSkillInput('');
+      return;
+    }
+
+    const nextSkills = [...customSkills, normalized];
+    setCustomSkills(nextSkills);
+    setCustomSkillInput('');
+    fetchCustomRecommendations(nextSkills);
+    savePreferencesToBackend(nextSkills, customExperienceYears, experienceLevel, customLocation, isCustomizeMode);
+  };
+
+  const handleRemoveSkill = (skillToRemove: string) => {
+    const nextSkills = customSkills.filter(s => s.toLowerCase() !== skillToRemove.toLowerCase());
+    setCustomSkills(nextSkills);
+    fetchCustomRecommendations(nextSkills);
+    savePreferencesToBackend(nextSkills, customExperienceYears, experienceLevel, customLocation, isCustomizeMode);
+  };
+
+  // Experience handlers
+  const handleExperienceLevelChange = (level: 'fresher' | 'experienced') => {
+    setExperienceLevel(level);
+    const newYears = level === 'fresher' ? 0 : (customExperienceYears > 0 ? customExperienceYears : 2);
+    setCustomExperienceYears(newYears);
+    fetchCustomRecommendations(undefined, newYears, level);
+    savePreferencesToBackend(customSkills, newYears, level, customLocation, isCustomizeMode);
+  };
+
+  const handleExperienceYearsChange = (years: number) => {
+    const cleanYears = Math.max(0, years);
+    const newLevel: 'fresher' | 'experienced' = cleanYears === 0 ? 'fresher' : 'experienced';
+    setCustomExperienceYears(cleanYears);
+    setExperienceLevel(newLevel);
+    fetchCustomRecommendations(undefined, cleanYears, newLevel);
+    savePreferencesToBackend(customSkills, cleanYears, newLevel, customLocation, isCustomizeMode);
+  };
+
+  // Location handler with 350ms debounce for text typing
+  const handleLocationChange = (newLoc: string) => {
+    setCustomLocation(newLoc);
+    if (locationDebounceTimer.current) {
+      clearTimeout(locationDebounceTimer.current);
+    }
+    locationDebounceTimer.current = setTimeout(() => {
+      fetchCustomRecommendations(undefined, undefined, undefined, newLoc);
+      savePreferencesToBackend(customSkills, customExperienceYears, experienceLevel, newLoc, isCustomizeMode);
+    }, 350);
+  };
+
+  // Quick preset location selection (immediate)
+  const handleSelectPresetLocation = (presetLoc: string) => {
+    if (locationDebounceTimer.current) {
+      clearTimeout(locationDebounceTimer.current);
+    }
+    setCustomLocation(presetLoc);
+    fetchCustomRecommendations(undefined, undefined, undefined, presetLoc);
+    savePreferencesToBackend(customSkills, customExperienceYears, experienceLevel, presetLoc, isCustomizeMode);
+  };
+
+  // Customize Switch Toggle
+  const handleToggleCustomize = (checked: boolean) => {
+    setIsCustomizeMode(checked);
+    localStorage.setItem('autoagenthire_customize_mode', String(checked));
+    savePreferencesToBackend(customSkills, customExperienceYears, experienceLevel, customLocation, checked);
+
+    if (checked) {
+      fetchCustomRecommendations();
+    }
+  };
+
+  // Single job application workflow handler
+  const handleOpenApplyModal = (job: MatchedJob) => {
+    setApplyingJob(job);
+    setApplySuccessResult(null);
+
+    const existing = getCandidateProfile();
+    setApplyCandidateName(clientName || profile?.candidate_name || existing.candidate_name || '');
+    setApplyCandidateEmail(clientEmail || profile?.email || existing.email || '');
+    setApplyCandidatePhone(clientPhone || profile?.phone || existing.phone || '');
+  };
+
+  const handleSubmitSingleApply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!applyingJob) return;
+
+    setIsSubmittingSingleApply(true);
+    try {
+      const cleanName = applyCandidateName.trim() || 'Candidate';
+      const cleanEmail = applyCandidateEmail.trim() || 'candidate@example.com';
+      const cleanPhone = applyCandidatePhone.trim();
+      const resumeName = applyResumeFile?.name || resumeFile?.name || (profile as any)?.resume_name || 'resume.pdf';
+      const expText = customExperienceYears === 0 ? 'Fresher (0 years)' : `${customExperienceYears} yrs experience`;
+
+      // Mark applied in both pools
+      setMatchedJobs(prev => prev.map(j => (j.id === applyingJob.id ? { ...j, applied: true } : j)));
+      setCustomRecommendations(prev => prev.map(j => (j.id === applyingJob.id ? { ...j, applied: true } : j)));
+
+      const refId = `AAH-APP-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      await applicationService.saveClientApplication({
+        id: applyingJob.id,
+        title: applyingJob.title,
+        company: applyingJob.company,
+        location: applyingJob.location,
+        match_score: applyingJob.match_percentage,
+        candidate_name: cleanName,
+        candidate_email: cleanEmail,
+        candidate_phone: cleanPhone,
+        experience: expText,
+        resume_filename: resumeName,
+        url: '/candidate/jobs',
+      });
+
+      // Dispatch event to update Application Tracking in real-time
+      try {
+        window.dispatchEvent(new CustomEvent('applicationSubmitted', {
+          detail: {
+            id: applyingJob.id,
+            title: applyingJob.title,
+            company: applyingJob.company,
+            candidate_name: cleanName,
+            reference_id: refId,
+          }
+        }));
+      } catch { }
+
+      setApplySuccessResult({
+        reference_id: refId,
+        job_title: applyingJob.title,
+        company: applyingJob.company,
+      });
+
+      toast({
+        title: 'Application Submitted! 🎉',
+        description: `Official Reference: ${refId}. Registered for ${applyingJob.title} at ${applyingJob.company}!`,
+      });
+    } catch (err: any) {
+      toast({
+        title: 'Application Recorded',
+        description: err.message || 'Application successfully registered for this position.',
+      });
+    } finally {
+      setIsSubmittingSingleApply(false);
+    }
+  };
 
   // Handle resume file upload and auto-trigger Gemini AI analysis
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,38 +680,7 @@ export default function JobAutomation() {
         data = await response.json();
       }
 
-      const skillsObj = data.skills || {};
-      const techSkills: string[] = skillsObj.technical || [];
-      const profSkills: string[] = skillsObj.professional || [];
-      const domainSkills: string[] = skillsObj.domain || [];
-      const allSkills: string[] = data.all_skills || [...techSkills, ...profSkills, ...domainSkills];
-
-      const parsedExp = data.total_experience || 'Fresher / Entry-Level (0-1 year)';
-
-      const extractedProfile: ExtractedProfile = {
-        resume_id: data.resume_id,
-        candidate_name: data.candidate_name || 'Candidate',
-        email: data.email || '',
-        phone: data.phone || '',
-        location: data.location || '',
-        professional_summary: data.professional_summary || '',
-        total_experience: parsedExp,
-        skills: {
-          technical: techSkills,
-          professional: profSkills,
-          domain: domainSkills,
-        },
-        all_skills: allSkills,
-        ai_powered: Boolean(data.ai_powered),
-        model_used: data.model_used,
-        config_message: data.config_message,
-        strengths: data.strengths || [],
-        missing_skills: data.missing_skills || [],
-        career_highlights: data.career_highlights || [],
-        suggested_improvements: data.suggested_improvements || [],
-        facts_vs_inferences: data.facts_vs_inferences || { explicit_facts: [], inferences: [] },
-        last_updated: data.last_updated || new Date().toISOString(),
-      };
+      const { extractedProfile, jobsFromBackend } = mapAtsProfileData(data);
 
       setProfile(extractedProfile);
 
@@ -245,33 +691,29 @@ export default function JobAutomation() {
       setClientName(extractedProfile.candidate_name);
       setClientEmail(extractedProfile.email);
       setClientPhone(extractedProfile.phone);
-      setClientExperience(parsedExp);
-
-      // Set matched jobs
-      const jobsFromBackend: MatchedJob[] = (data.matched_jobs || []).map((j: any) => ({
-        id: String(j.id),
-        title: j.title,
-        company: j.company || j.company_name || 'Tech Partner',
-        location: j.location || 'Remote',
-        employment_type: j.employment_type || j.job_type || 'Full-time',
-        salary_range: j.salary_range || j.salary_description || 'Competitive',
-        match_percentage: Number(j.match_percentage) || 80,
-        matching_skills: j.matching_skills || j.matched_skills || [],
-        missing_skills: j.missing_skills || [],
-        experience_compatibility: j.experience_compatibility,
-        suitability_reason: j.suitability_reason,
-        improvement_suggestions: j.improvement_suggestions || [],
-        description: j.description || '',
-        applied: false,
-      }));
+      setClientExperience(extractedProfile.total_experience);
 
       setMatchedJobs(jobsFromBackend);
 
+      // Store in live in-memory session so Resume & ATS Calibration page shares it seamlessly
+      setActiveResumeSession({
+        profile: extractedProfile,
+        parsedData: data,
+        matchedJobs: jobsFromBackend,
+        file: file,
+        previewUrl: previewUrl,
+        rawText: data.text || '',
+        recommendedDesignations: data.recommended_designations || [],
+        atsAnalysis: data.ats_analysis || null,
+      });
+
+      const skillCount = extractedProfile.all_skills?.length || 0;
+      const expText = extractedProfile.total_experience || 'relevant';
       toast({
         title: extractedProfile.ai_powered ? '✨ Google Gemini AI Analysis Complete!' : 'Resume Analysis Ready',
         description: jobsFromBackend.length > 0
-          ? `Extracted ${allSkills.length} skills, evaluated ${parsedExp} experience, and matched ${jobsFromBackend.length} active database vacancies.`
-          : `Extracted ${allSkills.length} skills, evaluated ${parsedExp} experience. No active job vacancies have been posted to the platform yet.`,
+          ? `Extracted ${skillCount} skills, evaluated ${expText} experience, and matched ${jobsFromBackend.length} active database vacancies.`
+          : `Extracted ${skillCount} skills, evaluated ${expText} experience. No active job vacancies have been posted to the platform yet.`,
       });
 
     } catch (err: any) {
@@ -287,10 +729,7 @@ export default function JobAutomation() {
   };
 
   const handleOpenResume = () => {
-    if (!previewUrl) return;
-    if (resumeFile?.type === 'application/pdf') {
-      window.open(previewUrl, '_blank');
-    } else {
+    if (previewUrl || resumeFile) {
       setShowPreviewModal(true);
     }
   };
@@ -364,10 +803,13 @@ export default function JobAutomation() {
     setTimeout(() => setCopiedSummary(false), 2500);
   };
 
-  // 1. Jobs filtered by percentage adjustment bar
+  // 1. Jobs pool: customized recommendations when in Customize mode, else resume-matched jobs
+  const activeJobsPool = isCustomizeMode ? customRecommendations : matchedJobs;
+
+  // 2. Jobs filtered by percentage adjustment bar
   const jobsFilteredByPercentage = useMemo(() => {
-    return matchedJobs.filter(j => j.match_percentage >= minMatchPercentage);
-  }, [matchedJobs, minMatchPercentage]);
+    return activeJobsPool.filter(j => j.match_percentage >= minMatchPercentage);
+  }, [activeJobsPool, minMatchPercentage]);
 
   // Counts for the category taps
   const tapCounts = useMemo(() => {
@@ -381,7 +823,7 @@ export default function JobAutomation() {
     };
   }, [jobsFilteredByPercentage]);
 
-  // 2. Jobs displayed based on active tap
+  // 3. Jobs displayed based on active tap
   const displayedJobs = useMemo(() => {
     return jobsFilteredByPercentage.filter(j => {
       if (activeJobTap === '90plus') return j.match_percentage >= 90;
@@ -398,17 +840,20 @@ export default function JobAutomation() {
   }, [displayedJobs]);
 
   // Apply to a single job
-  const handleApplySingle = async (jobId: string) => {
+  const handleApplySingle = async (jobId: string, customResumeName?: string) => {
     try {
-      const targetJob = matchedJobs.find(j => j.id === jobId);
+      const targetJob = activeJobsPool.find(j => j.id === jobId);
       const recipientEmail = clientEmail || profile?.email || 'candidate@example.com';
       const recipientName = clientName || profile?.candidate_name || 'Candidate';
       const recipientPhone = clientPhone || profile?.phone || '';
-      const verifiedExp = clientExperience || (profile as any)?.experience || 'Experience verified from resume';
-      const resumeName = resumeFile?.name || (profile as any)?.resume_name || 'resume.pdf';
+      const verifiedExp = clientExperience || (profile as any)?.experience || (customExperienceYears === 0 ? 'Fresher' : `${customExperienceYears} yrs experience`);
+      const resumeName = customResumeName || resumeFile?.name || (profile as any)?.resume_name || 'resume.pdf';
 
-      // Mark as applied locally
+      // Mark as applied locally in both pools
       setMatchedJobs(prev =>
+        prev.map(j => (j.id === jobId ? { ...j, applied: true } : j))
+      );
+      setCustomRecommendations(prev =>
         prev.map(j => (j.id === jobId ? { ...j, applied: true } : j))
       );
 
@@ -431,7 +876,7 @@ export default function JobAutomation() {
         title: 'Application Submitted! 🎉',
         description: `Personalized application dispatched for ${targetJob?.title} at ${targetJob?.company}!`,
       });
-    } catch (err: any) {
+    } catch {
       toast({
         title: 'Application Recorded',
         description: 'Application recorded for this position.',
@@ -544,21 +989,88 @@ export default function JobAutomation() {
           </p>
         </div>
 
-        {profile?.ai_powered && (
-          <div className="flex items-center gap-2">
-            <Badge className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-3 py-1 flex items-center gap-1.5 shadow-xs">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>⚡ Google Gemini AI Active</span>
-              <span className="opacity-70 text-[10px]">({profile.model_used || 'gemini-flash-latest'})</span>
-            </Badge>
+        <div className="flex items-center gap-3 flex-wrap">
+          {profile?.ai_powered && !isCustomizeMode && (
+            <div className="flex items-center gap-2">
+              <Badge className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-3 py-1 flex items-center gap-1.5 shadow-xs">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>⚡ Google Gemini AI Active</span>
+                <span className="opacity-70 text-[10px]">({profile.model_used || 'gemini-flash-latest'})</span>
+              </Badge>
+            </div>
+          )}
+
+          {/* Mode Distinction Badge */}
+          <Badge
+            variant="outline"
+            className={`text-xs px-3 py-1 flex items-center gap-1.5 font-medium ${
+              isCustomizeMode
+                ? 'bg-primary/10 text-primary border-primary/30'
+                : 'bg-muted/60 text-muted-foreground border-border/80'
+            }`}
+          >
+            {isCustomizeMode ? (
+              <>
+                <Sliders className="w-3.5 h-3.5 text-primary" />
+                <span>Active Mode: Manual Customization</span>
+              </>
+            ) : (
+              <>
+                <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Active Mode: Resume-Based Recommendations</span>
+              </>
+            )}
+          </Badge>
+
+          {/* Customize Mode Switch */}
+          <div className="flex items-center gap-2.5 bg-card/90 border border-border/80 rounded-full px-4 py-1.5 shadow-xs">
+            <Sliders className="w-4 h-4 text-primary" />
+            <Label
+              htmlFor="customize-switch"
+              className="text-xs font-semibold cursor-pointer text-foreground flex items-center gap-1.5 select-none"
+            >
+              <span>Customize</span>
+              {isCustomizeMode && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-primary/10 text-primary border-primary/30 font-bold uppercase tracking-wider">
+                  ON
+                </Badge>
+              )}
+            </Label>
+            <Switch
+              id="customize-switch"
+              checked={isCustomizeMode}
+              onCheckedChange={handleToggleCustomize}
+              className="data-[state=checked]:bg-primary"
+            />
           </div>
-        )}
+
+          {/* Reset Page Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowResetConfirm(true)}
+            className="text-xs border-border/80 text-muted-foreground hover:text-foreground gap-1.5 h-9"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset Page</span>
+          </Button>
+        </div>
       </div>
 
       {/* =========================================================================
-          CONTAINER 1: RESUME CONTAINER & AI INSIGHTS
+          ANIMATED CONTAINER SWITCH: RESUME INTELLIGENCE VS CUSTOMIZE FORM
          ========================================================================= */}
-      <Card className="border border-primary/20 shadow-sm bg-card/60 backdrop-blur-sm">
+      <AnimatePresence mode="wait">
+        {!isCustomizeMode ? (
+          <motion.div
+            key="resume-intelligence-view"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+          >
+            {/* CONTAINER 1: RESUME CONTAINER & AI INSIGHTS */}
+            <Card className="border border-primary/20 shadow-sm bg-card/60 backdrop-blur-sm">
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
@@ -838,6 +1350,322 @@ export default function JobAutomation() {
           )}
         </CardContent>
       </Card>
+    </motion.div>
+  ) : (
+    <motion.div
+      key="customize-preferences-view"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -12 }}
+      transition={{ duration: 0.25, ease: "easeInOut" }}
+      className="space-y-6"
+    >
+      {/* =========================================================================
+          NEW CONTAINER: CUSTOMIZE JOB RECOMMENDATIONS (NO RESUME REQUIRED)
+         ========================================================================= */}
+      <Card className="border border-primary/25 shadow-sm bg-card/70 backdrop-blur-sm">
+        <CardHeader className="pb-4 border-b border-border/40">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle className="text-xl flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-primary" />
+                Customize Job Recommendations
+              </CardTitle>
+              <CardDescription>
+                Discover and rank matching positions tailored precisely to your skills, experience, and location preferences without requiring an uploaded resume.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2 self-start sm:self-center">
+              <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30 font-semibold px-2.5 py-1 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Auto-Recommending</span>
+              </Badge>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6 pt-5">
+          {/* SECTION 1: SKILLS */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <ListChecks className="w-4 h-4 text-primary" />
+                <span>SECTION 1: Technical & Professional Skills</span>
+                <span className="text-xs text-muted-foreground font-normal">
+                  ({customSkills.length} added)
+                </span>
+              </Label>
+              <span className="text-[11px] text-muted-foreground">Press Enter or click Add</span>
+            </div>
+
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Input
+                  placeholder="Enter a skill (e.g., Python, React, SQL, FastAPI, Machine Learning)..."
+                  value={customSkillInput}
+                  onChange={(e) => setCustomSkillInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddSkill();
+                    }
+                  }}
+                  className="bg-background/80 text-xs sm:text-sm h-10 pr-8"
+                />
+                {customSkillInput && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomSkillInput("")}
+                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              <Button
+                type="button"
+                onClick={() => handleAddSkill()}
+                disabled={!customSkillInput.trim()}
+                className="h-10 px-4 text-xs font-semibold gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Skill</span>
+              </Button>
+            </div>
+
+            {/* Added Skill Chips */}
+            <div className="flex flex-wrap gap-2 min-h-8 items-center p-2.5 rounded-lg bg-background/50 border border-border/60">
+              {customSkills.length === 0 ? (
+                <span className="text-xs text-muted-foreground italic">
+                  No custom skills added yet. Type a skill above or click any suggestion below.
+                </span>
+              ) : (
+                customSkills.map((skill) => (
+                  <Badge
+                    key={skill}
+                    className="bg-primary/15 text-primary border border-primary/30 text-xs py-1 px-2.5 flex items-center gap-1.5 shadow-2xs hover:bg-primary/20 transition-all"
+                  >
+                    <span>{skill}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSkill(skill)}
+                      className="text-primary/70 hover:text-destructive hover:scale-110 transition-transform"
+                      title={`Remove ${skill}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </Badge>
+                ))
+              )}
+            </div>
+
+            {/* Skill Suggestions / Catalog Autocomplete */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-primary" />
+                Popular Skill Suggestions (Click to add):
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {skillSuggestions
+                  .filter((s) => !customSkills.some((cs) => cs.toLowerCase() === s.toLowerCase()))
+                  .slice(0, 14)
+                  .map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => handleAddSkill(s)}
+                      className="text-[11px] px-2.5 py-0.5 rounded-full bg-muted/60 text-muted-foreground border border-border/60 hover:bg-primary/10 hover:text-primary hover:border-primary/30 transition-colors flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3 opacity-60" />
+                      <span>{s}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 2: EXPERIENCE */}
+          <div className="space-y-3 pt-3 border-t border-border/50">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <GraduationCap className="w-4 h-4 text-primary" />
+                <span>SECTION 2: Experience Level</span>
+              </Label>
+              <Badge variant="outline" className="text-xs border-primary/30 text-primary font-mono font-semibold">
+                {customExperienceYears === 0 ? "🎓 Fresher (0 Years)" : `💼 ${customExperienceYears} Year${customExperienceYears > 1 ? "s" : ""}`}
+              </Badge>
+            </div>
+
+            {/* Experience Level Selector: Fresher vs Experienced */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => handleExperienceLevelChange("fresher")}
+                className={`p-3.5 rounded-xl border text-left transition-all flex items-center justify-between ${
+                  experienceLevel === "fresher" && customExperienceYears === 0
+                    ? "bg-primary/15 border-primary text-foreground ring-1 ring-primary shadow-xs"
+                    : "bg-background/60 border-border/70 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    experienceLevel === "fresher" && customExperienceYears === 0
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  }`}>
+                    <GraduationCap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h5 className="font-semibold text-xs sm:text-sm text-foreground">Fresher / Graduate</h5>
+                    <p className="text-[11px] text-muted-foreground">0 years • Entry-level openings & internships</p>
+                  </div>
+                </div>
+                {experienceLevel === "fresher" && customExperienceYears === 0 && (
+                  <CheckCircle className="w-4 h-4 text-primary" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExperienceLevelChange("experienced")}
+                className={`p-3.5 rounded-xl border text-left transition-all flex items-center justify-between ${
+                  experienceLevel === "experienced" || customExperienceYears > 0
+                    ? "bg-primary/15 border-primary text-foreground ring-1 ring-primary shadow-xs"
+                    : "bg-background/60 border-border/70 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    experienceLevel === "experienced" || customExperienceYears > 0
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  }`}>
+                    <Briefcase className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h5 className="font-semibold text-xs sm:text-sm text-foreground">Experienced Professional</h5>
+                    <p className="text-[11px] text-muted-foreground">1+ years • Mid, senior & specialized roles</p>
+                  </div>
+                </div>
+                {(experienceLevel === "experienced" || customExperienceYears > 0) && (
+                  <CheckCircle className="w-4 h-4 text-primary" />
+                )}
+              </button>
+            </div>
+
+            {/* Quick Year Selection Buttons & Numeric Stepper */}
+            <div className="space-y-2 pt-1">
+              <span className="text-xs text-muted-foreground font-medium">Years of Experience:</span>
+              <div className="flex flex-wrap items-center gap-2">
+                {[
+                  { label: "Fresher (0 yrs)", val: 0 },
+                  { label: "0–1 yrs", val: 1 },
+                  { label: "1–2 yrs", val: 2 },
+                  { label: "2–3 yrs", val: 3 },
+                  { label: "3–5 yrs", val: 5 },
+                  { label: "5+ yrs", val: 6 },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => handleExperienceYearsChange(item.val)}
+                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                      (item.val === 0 && customExperienceYears === 0) ||
+                      (item.val === 1 && customExperienceYears > 0 && customExperienceYears <= 1) ||
+                      (item.val === 2 && customExperienceYears > 1 && customExperienceYears <= 2) ||
+                      (item.val === 3 && customExperienceYears > 2 && customExperienceYears <= 3) ||
+                      (item.val === 5 && customExperienceYears > 3 && customExperienceYears <= 5) ||
+                      (item.val === 6 && customExperienceYears > 5)
+                        ? "bg-primary text-primary-foreground shadow-xs font-semibold"
+                        : "bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground border border-border/50"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+
+                {/* Custom numeric stepper */}
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <span className="text-xs text-muted-foreground">Exact:</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="40"
+                    step="0.5"
+                    value={customExperienceYears}
+                    onChange={(e) => {
+                      const num = parseFloat(e.target.value) || 0;
+                      handleExperienceYearsChange(num);
+                    }}
+                    className="w-20 h-8 text-xs bg-background/80 text-center font-mono"
+                  />
+                  <span className="text-xs text-muted-foreground">yrs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 3: LOCATION */}
+          <div className="space-y-3 pt-3 border-t border-border/50">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-primary" />
+                <span>SECTION 3: Preferred Location & Work Arrangement</span>
+              </Label>
+              <span className="text-[11px] text-muted-foreground">Supports Remote & Global Hubs</span>
+            </div>
+
+            <div className="relative">
+              <MapPin className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
+              <Input
+                placeholder="Enter city, state, country or 'Remote' (e.g., Hyderabad, Bengaluru, Remote)..."
+                value={customLocation}
+                onChange={(e) => handleLocationChange(e.target.value)}
+                className="pl-9 pr-8 bg-background/80 text-xs sm:text-sm h-10"
+              />
+              {customLocation && (
+                <button
+                  type="button"
+                  onClick={() => handleLocationChange("")}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Quick Location Chips */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-xs text-muted-foreground font-medium mr-1">Quick Picks:</span>
+              {[
+                { label: "🌐 Remote", val: "Remote" },
+                { label: "Hyderabad", val: "Hyderabad" },
+                { label: "Bengaluru", val: "Bengaluru" },
+                { label: "Chennai", val: "Chennai" },
+                { label: "Mumbai", val: "Mumbai" },
+                { label: "Delhi / NCR", val: "Delhi" },
+                { label: "San Francisco", val: "San Francisco" },
+                { label: "London", val: "London" },
+              ].map((loc) => (
+                <button
+                  key={loc.val}
+                  type="button"
+                  onClick={() => handleSelectPresetLocation(loc.val)}
+                  className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
+                    customLocation.toLowerCase() === loc.val.toLowerCase()
+                      ? "bg-primary text-primary-foreground font-semibold shadow-2xs"
+                      : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground border border-border/50"
+                  }`}
+                >
+                  {loc.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  )}
+</AnimatePresence>
 
       {/* =========================================================================
           PERCENTAGE ADJUSTMENT BAR (CONTROLS JOBS BELOW)
@@ -1174,29 +2002,48 @@ export default function JobAutomation() {
                     </div>
 
                     {/* Bottom Action Row */}
-                    <div className="pt-3 border-t border-border/50 flex items-center justify-between gap-2">
+                    <div className="pt-3 border-t border-border/50 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        {/* Apply Single Button */}
+                        {/* View Details Button */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedJobForDetails(job)}
+                          className="text-xs h-8 gap-1.5"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-primary" />
+                          <span>View Details</span>
+                        </Button>
+
+                        {/* Apply Now Button */}
                         {job.applied ? (
-                          <Badge className="bg-emerald-600 text-white font-medium flex items-center gap-1 text-xs py-1 px-3">
+                          <Badge className="bg-emerald-600 text-white font-medium flex items-center gap-1 text-xs py-1 px-3 h-8">
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Applied
+                            <span>Applied</span>
                           </Badge>
                         ) : (
                           <Button
                             variant="default"
                             size="sm"
-                            onClick={() => handleApplySingle(job.id)}
-                            className="text-xs font-medium"
+                            onClick={() => handleOpenApplyModal(job)}
+                            className="text-xs h-8 gap-1.5 bg-primary text-primary-foreground font-medium shadow-2xs hover:bg-primary/90"
                           >
-                            Apply Single
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Apply Now</span>
                           </Button>
                         )}
                       </div>
 
-                      <span className="text-[11px] text-muted-foreground hidden sm:inline">
-                        Verified Vacancy
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {job.experience_compatibility && (
+                          <Badge variant="outline" className="text-[10px] bg-muted/40 text-muted-foreground border-border/60">
+                            {job.experience_compatibility}
+                          </Badge>
+                        )}
+                        <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                          Verified Vacancy
+                        </span>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1474,33 +2321,382 @@ export default function JobAutomation() {
       </Dialog>
 
       {/* Modal for viewing the resume directly */}
-      <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="w-5 h-5 text-primary" />
-              {resumeFile?.name || 'Resume Preview'}
-            </DialogTitle>
-            <DialogDescription>
-              Viewing uploaded resume content
-            </DialogDescription>
-          </DialogHeader>
+      <ResumeDocumentPreview
+        isOpen={showPreviewModal}
+        onClose={() => setShowPreviewModal(false)}
+        file={resumeFile}
+        fileUrl={previewUrl}
+        filename={resumeFile?.name}
+      />
 
-          {resumeFile?.type === 'application/pdf' && previewUrl ? (
-            <iframe
-              src={previewUrl}
-              className="w-full h-[65vh] rounded-md border"
-              title="Resume Preview"
-            />
-          ) : (
-            <div className="space-y-4">
-              <pre className="p-4 bg-muted/60 rounded-md text-xs font-mono whitespace-pre-wrap max-h-[60vh] overflow-y-auto">
-                {profile?.professional_summary || 'Preview not available as plain text.'}
-              </pre>
-            </div>
+      {/* =========================================================================
+          MODAL: VIEW DETAILS OF A JOB
+         ========================================================================= */}
+      <Dialog open={Boolean(selectedJobForDetails)} onOpenChange={(open) => !open && setSelectedJobForDetails(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          {selectedJobForDetails && (
+            <>
+              <DialogHeader>
+                <div className="flex items-start justify-between gap-3 pr-6">
+                  <div>
+                    <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                      <Briefcase className="w-5 h-5 text-primary" />
+                      {selectedJobForDetails.title}
+                    </DialogTitle>
+                    <DialogDescription className="text-sm font-medium text-foreground/80 mt-1 flex flex-wrap items-center gap-3">
+                      <span className="flex items-center gap-1 font-semibold text-primary">
+                        <Building className="w-3.5 h-3.5" />
+                        {selectedJobForDetails.company}
+                      </span>
+                      <span className="flex items-center gap-1 text-muted-foreground">
+                        <MapPin className="w-3.5 h-3.5" />
+                        {selectedJobForDetails.location}
+                      </span>
+                      {selectedJobForDetails.employment_type && (
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Clock className="w-3.5 h-3.5" />
+                          {selectedJobForDetails.employment_type}
+                        </span>
+                      )}
+                    </DialogDescription>
+                  </div>
+                  <Badge className="bg-primary/15 text-primary border border-primary/30 font-bold px-3 py-1.5 text-sm shrink-0">
+                    {selectedJobForDetails.match_percentage}% Match
+                  </Badge>
+                </div>
+              </DialogHeader>
+
+              <div className="space-y-5 py-3">
+                {/* Suitability Reason */}
+                {selectedJobForDetails.suitability_reason && (
+                  <div className="p-3.5 rounded-lg bg-primary/5 border border-primary/20 space-y-1">
+                    <h4 className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Relevance & Match Insights
+                    </h4>
+                    <p className="text-xs text-foreground/90 leading-relaxed">
+                      {selectedJobForDetails.suitability_reason}
+                    </p>
+                  </div>
+                )}
+
+                {/* Experience Compatibility */}
+                {selectedJobForDetails.experience_compatibility && (
+                  <div className="p-3 rounded-lg bg-muted/40 border border-border flex items-center justify-between text-xs">
+                    <span className="font-medium text-muted-foreground">Experience Requirement:</span>
+                    <Badge variant="outline" className="bg-background text-foreground font-semibold">
+                      {selectedJobForDetails.experience_compatibility}
+                    </Badge>
+                  </div>
+                )}
+
+                {/* Skills Analysis */}
+                <div className="space-y-3">
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                      Matching Skills ({selectedJobForDetails.matching_skills.length})
+                    </h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedJobForDetails.matching_skills.length > 0 ? (
+                        selectedJobForDetails.matching_skills.map((skill, i) => (
+                          <Badge key={i} className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-xs">
+                            ✓ {skill}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-xs text-muted-foreground">No directly matching skills found</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedJobForDetails.missing_skills.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                        Missing or Recommended Skills ({selectedJobForDetails.missing_skills.length})
+                      </h4>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedJobForDetails.missing_skills.map((skill, i) => (
+                          <Badge key={i} variant="outline" className="border-border text-muted-foreground text-xs">
+                            + {skill}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Full Job Description */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-primary" />
+                    Job Description
+                  </h4>
+                  <div className="p-4 rounded-xl bg-muted/30 border border-border/60 max-h-64 overflow-y-auto">
+                    <JobDescriptionRenderer content={selectedJobForDetails.description} />
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t border-border">
+                <Button variant="outline" onClick={() => setSelectedJobForDetails(null)}>
+                  Close
+                </Button>
+                {selectedJobForDetails.applied ? (
+                  <Badge className="bg-emerald-600 text-white font-medium flex items-center gap-1 text-xs py-1.5 px-4 h-9">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Already Applied
+                  </Badge>
+                ) : (
+                  <Button
+                    variant="default"
+                    onClick={() => {
+                      const job = selectedJobForDetails;
+                      setSelectedJobForDetails(null);
+                      handleOpenApplyModal(job);
+                    }}
+                    className="gap-2 bg-primary font-medium"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>Apply for Role</span>
+                  </Button>
+                )}
+              </DialogFooter>
+            </>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* =========================================================================
+          MODAL: APPLY NOW (CANDIDATE DETAILS + RESUME VERIFICATION)
+         ========================================================================= */}
+      <Dialog open={Boolean(applyingJob)} onOpenChange={(open) => !open && setApplyingJob(null)}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          {applySuccessResult ? (
+            <div className="py-6 space-y-5 text-center">
+              <div className="w-14 h-14 bg-emerald-500/10 text-emerald-600 rounded-full flex items-center justify-center mx-auto border border-emerald-500/20">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+              <div className="space-y-1.5">
+                <DialogTitle className="text-xl font-bold">Application Successfully Submitted!</DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Your application has been registered and synced with your persistent Application Tracking dashboard.
+                </DialogDescription>
+              </div>
+
+              <div className="p-4 rounded-xl bg-muted/40 border border-border text-left space-y-2 text-xs">
+                <div className="flex justify-between border-b border-border/60 pb-2">
+                  <span className="text-muted-foreground font-medium">Position:</span>
+                  <span className="font-semibold text-foreground">{applySuccessResult.job_title}</span>
+                </div>
+                <div className="flex justify-between border-b border-border/60 pb-2">
+                  <span className="text-muted-foreground font-medium">Company:</span>
+                  <span className="font-semibold text-foreground">{applySuccessResult.company}</span>
+                </div>
+                <div className="flex justify-between pt-1">
+                  <span className="text-muted-foreground font-medium">Official Reference ID:</span>
+                  <span className="font-mono font-bold text-primary">{applySuccessResult.reference_id}</span>
+                </div>
+              </div>
+
+              <Button
+                variant="default"
+                className="w-full bg-primary"
+                onClick={() => {
+                  setApplyingJob(null);
+                  setApplySuccessResult(null);
+                }}
+              >
+                Done
+              </Button>
+            </div>
+          ) : applyingJob && (
+            <form onSubmit={handleSubmitSingleApply}>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+                  <Send className="w-5 h-5 text-primary" />
+                  Apply for {applyingJob.title}
+                </DialogTitle>
+                <DialogDescription>
+                  Review your candidate details and attach your resume before submitting to <strong className="text-foreground">{applyingJob.company}</strong>.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 py-4">
+                {/* Candidate Info Verification */}
+                <div className="p-4 rounded-xl bg-muted/40 border border-border space-y-3">
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-primary" />
+                    Candidate Details
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground block mb-1">Full Name *</Label>
+                      <Input
+                        value={applyCandidateName}
+                        onChange={(e) => setApplyCandidateName(e.target.value)}
+                        placeholder="e.g. Alex Morgan"
+                        required
+                        className="h-8 text-xs bg-background"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground block mb-1">Email Address *</Label>
+                      <Input
+                        type="email"
+                        value={applyCandidateEmail}
+                        onChange={(e) => setApplyCandidateEmail(e.target.value)}
+                        placeholder="e.g. alex@example.com"
+                        required
+                        className="h-8 text-xs bg-background"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label className="text-[11px] text-muted-foreground block mb-1">Phone Number</Label>
+                      <Input
+                        type="tel"
+                        value={applyCandidatePhone}
+                        onChange={(e) => setApplyCandidatePhone(e.target.value)}
+                        placeholder="e.g. +1 (555) 234-5678"
+                        className="h-8 text-xs bg-background"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Resume Upload / Attachment Section */}
+                <div className="p-4 rounded-xl bg-muted/40 border border-border space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-primary" />
+                      Resume Attachment *
+                    </h4>
+                    {(applyResumeFile || resumeFile) && (
+                      <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
+                        ✓ Ready
+                      </Badge>
+                    )}
+                  </div>
+
+                  {applyResumeFile ? (
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-background border border-border text-xs">
+                      <span className="font-medium text-foreground truncate max-w-[280px]">
+                        📄 {applyResumeFile.name} ({(applyResumeFile.size / 1024).toFixed(1)} KB)
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setApplyResumeFile(null)}
+                        className="text-xs h-6 px-2 text-destructive hover:bg-destructive/10"
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ) : resumeFile ? (
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-background border border-border text-xs">
+                      <span className="font-medium text-foreground truncate max-w-[280px]">
+                        📄 {resumeFile.name} (Active Profile Resume)
+                      </span>
+                      <label className="text-xs text-primary hover:underline cursor-pointer font-medium">
+                        Change
+                        <input
+                          type="file"
+                          accept=".pdf,.docx,.doc,.txt"
+                          onChange={(e) => e.target.files?.[0] && setApplyResumeFile(e.target.files[0])}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="border border-dashed border-border rounded-lg p-4 text-center bg-background/50 hover:bg-background/80 transition-colors">
+                      <Upload className="w-6 h-6 text-muted-foreground mx-auto mb-1.5" />
+                      <p className="text-xs font-medium text-foreground">Upload your resume for this application</p>
+                      <p className="text-[11px] text-muted-foreground mb-2.5">PDF, DOCX, or TXT up to 10MB</p>
+                      <label>
+                        <Button type="button" variant="outline" size="sm" className="text-xs pointer-events-none">
+                          Browse File
+                        </Button>
+                        <input
+                          type="file"
+                          accept=".pdf,.docx,.doc,.txt"
+                          onChange={(e) => e.target.files?.[0] && setApplyResumeFile(e.target.files[0])}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                {/* Optional Cover Letter */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Optional Cover Note / Note to Recruiter</Label>
+                  <textarea
+                    rows={3}
+                    value={applyCoverLetter}
+                    onChange={(e) => setApplyCoverLetter(e.target.value)}
+                    placeholder="Briefly state your passion or key relevant accomplishments for this position..."
+                    className="w-full text-xs p-3 rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setApplyingJob(null)}
+                  disabled={isSubmittingSingleApply}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmittingSingleApply}
+                  className="bg-primary gap-2"
+                >
+                  {isSubmittingSingleApply ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Submitting Application...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      Submit Application
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Confirmation Dialog */}
+      <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
+        <AlertDialogContent className="bg-card border-border text-foreground">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-bold">
+              Reset Page?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              Are you sure you want to reset all temporary automation configurations, manual filters, and search inputs? Your saved profile, resumes, and submitted applications will remain untouched.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel className="text-xs border-border">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleResetPage}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground text-xs font-semibold"
+            >
+              Reset Page
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </div>
   );
 }

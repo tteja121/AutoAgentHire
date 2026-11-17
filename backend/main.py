@@ -3,6 +3,7 @@ Main FastAPI application entry point.
 Initializes the application, middleware, and routes.
 """
 import sys
+import os
 import asyncio
 from pathlib import Path
 
@@ -10,9 +11,10 @@ from pathlib import Path
 # in imported modules do not raise UnicodeEncodeError (cp1252 default on Windows).
 # This MUST run before any module that prints emoji characters is imported.
 if sys.platform == 'win32':
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # Windows-specific: ProactorEventLoop has been the default since Python 3.8.
 # set_event_loop_policy is deprecated starting in Python 3.14 (and removed in 3.16).
@@ -47,6 +49,11 @@ from backend.api.autoagenthire import router as autoagenthire_router
 from backend.routes.auth_routes import router as auth_router
 from backend.routes.recruiter_routes import router as recruiter_router
 from backend.routes.mongo_routes import router as mongo_router
+from backend.routes.integration_routes import router as integration_router, root_integration_router, admin_router
+from backend.routes.job_listings_routes import router as job_listings_router, root_jobs_router
+from backend.routes.candidate_recommendations_routes import router as candidate_recommendations_router
+from backend.routes.email_routes import router as email_router, admin_email_router
+from backend.routes.practice_routes import router as practice_router
 from backend.database.mongo import mongo_manager
 from backend.database.connection import init_db, get_db
 
@@ -79,29 +86,42 @@ async def lifespan(app: FastAPI):
     
     # Initialize database without blocking service startup indefinitely.
     # Render needs the process to bind quickly; DB issues should not prevent boot.
-    try:
-        await asyncio.wait_for(asyncio.to_thread(init_db), timeout=25)
-        print("✓ Database initialized")
-    except asyncio.TimeoutError:
-        print("[WARN] Database initialization timed out; continuing startup")
-    except Exception as e:
-        print(f"[WARN] Database initialization failed; continuing startup: {e}")
+    if "unittest" not in sys.modules and os.getenv("TESTING") != "true":
+        try:
+            await asyncio.wait_for(asyncio.to_thread(init_db), timeout=25)
+            print("✓ Database initialized")
+        except asyncio.TimeoutError:
+            print("[WARN] Database initialization timed out; continuing startup")
+        except Exception as e:
+            print(f"[WARN] Database initialization failed; continuing startup: {e}")
 
     # Initialize MongoDB Atlas connection (optional document store)
-    try:
-        mongo_ok = await asyncio.wait_for(asyncio.to_thread(mongo_manager.connect), timeout=10.0)
-        if mongo_ok:
-            print("✓ MongoDB Atlas connected successfully")
-        else:
-            print("ℹ Operating on primary SQLite database (MongoDB Atlas optional mirror offline)")
-    except asyncio.TimeoutError:
-        print("ℹ MongoDB Atlas connection timed out; operating on primary SQLite database")
-    except Exception as e:
-        print(f"ℹ MongoDB Atlas note: {e}")
-    
-    # TODO: Initialize vector store
-    # TODO: Start background scheduler
-    
+    if "unittest" not in sys.modules and os.getenv("TESTING") != "true":
+        try:
+            mongo_ok = await asyncio.wait_for(asyncio.to_thread(mongo_manager.connect), timeout=10.0)
+            if mongo_ok:
+                print("✓ MongoDB Atlas connected successfully")
+            else:
+                print("ℹ Operating on primary SQLite database (MongoDB Atlas optional mirror offline)")
+        except asyncio.TimeoutError:
+            print("ℹ MongoDB Atlas connection timed out; operating on primary SQLite database")
+        except Exception as e:
+            print(f"ℹ MongoDB Atlas note: {e}")
+
+    # Initialize default verified ATS integrations and trigger non-blocking seed sync if needed
+    if "unittest" not in sys.modules and os.getenv("TESTING") != "true":
+        async def _async_sync_seed():
+            try:
+                from backend.database.connection import SessionLocal
+                from backend.services.job_sync_service import ensure_default_jobs_synced
+                with SessionLocal() as db_session:
+                    res = await asyncio.to_thread(ensure_default_jobs_synced, db_session)
+                    print(f"✓ Job listings synchronization check complete: {res.get('status')} (total jobs: {res.get('total_jobs', res.get('total_jobs_in_db', 0))})")
+            except Exception as _sync_err:
+                print(f"[WARN] Startup job listings synchronization notice: {_sync_err}")
+
+        asyncio.create_task(_async_sync_seed())
+
     yield
     
     # Shutdown
@@ -190,6 +210,16 @@ app.include_router(ats_router)
 app.include_router(cover_letter_router)
 app.include_router(autoagenthire_router)
 app.include_router(mongo_router)
+app.include_router(integration_router)
+app.include_router(root_integration_router)
+app.include_router(job_listings_router)
+app.include_router(root_jobs_router)
+app.include_router(candidate_recommendations_router)
+app.include_router(admin_router)
+app.include_router(admin_router, prefix="/api/recruiter/authorizer")
+app.include_router(email_router)
+app.include_router(admin_email_router)
+app.include_router(practice_router)
 if v2_router is not None:
     app.include_router(v2_router)  # V2 API for frontend
 

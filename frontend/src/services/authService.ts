@@ -3,7 +3,8 @@
  * Manages user registration, login, logout, and profile management
  * using FastAPI backend with MongoDB Atlas document store.
  */
-import { API_BASE_URL, apiClient, API_ENDPOINTS } from '@/lib/api';
+import { API_BASE_URL, resolveApiUrl, apiClient, API_ENDPOINTS } from '@/lib/api';
+import { getGoogleClientId } from '@/lib/googleAuth';
 
 export interface UserProfile {
   id: string | number;
@@ -27,6 +28,45 @@ export function isPersonalEmail(email: string): boolean {
   if (!email || !email.includes('@')) return false;
   const domain = email.split('@').pop()?.trim().toLowerCase() || '';
   return PERSONAL_EMAIL_DOMAINS.has(domain);
+}
+
+/**
+ * Safe fetch wrapper that handles relative or absolute base URLs and formats
+ * network connection refused / offline errors into clear, friendly error messages.
+ */
+async function authFetch(endpoint: string, options: RequestInit): Promise<Response> {
+  const url = resolveApiUrl(endpoint);
+
+  try {
+    const res = await fetch(url, options);
+
+    // Intercept proxy failure responses (e.g. Vite dev proxy returning 500 when port 8000 is down)
+    if (res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504) {
+      const cloned = res.clone();
+      const errText = await cloned.text().catch(() => '');
+      if (errText.includes('ECONNREFUSED') || errText.includes('connect ECONNREFUSED')) {
+        throw new Error(
+          'Unable to reach local backend on port 8000 (ECONNREFUSED). Please start the server with: "python -m uvicorn backend.main:app --reload --port 8000".'
+        );
+      }
+    }
+
+    return res;
+  } catch (err: any) {
+    if (err.message && (err.message.includes('FastAPI') || err.message.includes('ECONNREFUSED'))) {
+      throw err;
+    }
+    console.error(`[Auth Request Failed] ${options.method || 'GET'} ${url}:`, err);
+    const isLocal = url.includes('localhost') || url.includes('127.0.0.1') || (!url.startsWith('http') && typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
+    if (isLocal) {
+      throw new Error(
+        `Unable to connect to local backend at ${url}. If testing locally, ensure the FastAPI server is running with: "python -m uvicorn backend.main:app --reload --port 8000".`
+      );
+    }
+    throw new Error(
+      `Unable to reach authentication server at ${url}. Please verify your backend deployment or check VITE_API_URL.`
+    );
+  }
 }
 
 // Simple subscriber system for auth state listeners
@@ -106,7 +146,7 @@ export const authService = {
       );
     }
 
-    const res = await fetch(`${API_BASE_URL}/auth/signup`, {
+    const res = await authFetch('/auth/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -156,7 +196,7 @@ export const authService = {
    * Verify 6-digit OTP code to activate Client account
    */
   async verifySignupOtp(email: string, code: string) {
-    const res = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+    const res = await authFetch('/auth/verify-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: email.trim().toLowerCase(), code: code.trim() }),
@@ -182,7 +222,7 @@ export const authService = {
    * Resend 6-digit verification code
    */
   async resendSignupOtp(email: string) {
-    const res = await fetch(`${API_BASE_URL}/auth/resend-otp`, {
+    const res = await authFetch('/auth/resend-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: email.trim().toLowerCase() }),
@@ -200,7 +240,7 @@ export const authService = {
    * Resolve User ID to registered official email via backend
    */
   async resolveUserId(userId: string, role?: string): Promise<{ email: string; role: string; custom_user_id: string; full_name?: string }> {
-    const res = await fetch(`${API_BASE_URL}/auth/resolve-user-id`, {
+    const res = await authFetch('/auth/resolve-user-id', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -261,7 +301,7 @@ export const authService = {
     }
 
     // 3. Authenticate with backend API (/auth/login)
-    const bRes = await fetch(`${API_BASE_URL}/auth/login`, {
+    const bRes = await authFetch('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -314,15 +354,31 @@ export const authService = {
    * Authenticate using Google OAuth token directly with backend
    */
   async signInWithGoogleToken(accessToken: string) {
-    const res = await fetch(`${API_BASE_URL}/auth/google`, {
+    const res = await authFetch('/auth/google', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_token: accessToken }),
+      body: JSON.stringify({
+        access_token: accessToken,
+        token: accessToken,
+        credential: accessToken,
+      }),
     });
 
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.detail || 'Failed to authenticate with Google account.');
+      let detail = errJson?.detail || errJson?.message;
+      if (Array.isArray(detail)) {
+        detail = detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ');
+      } else if (typeof detail === 'object' && detail !== null) {
+        detail = JSON.stringify(detail);
+      }
+      if (res.status === 401) {
+        throw new Error(detail || 'Google session expired or invalid. Please sign in again.');
+      }
+      if (res.status === 503 || res.status === 502) {
+        throw new Error('Authentication service is temporarily unavailable. Please try again shortly.');
+      }
+      throw new Error(detail || `Google authentication failed (HTTP ${res.status}).`);
     }
 
     const data = await res.json();
@@ -343,7 +399,7 @@ export const authService = {
    * Sign in / Register with Google OAuth (direct redirect flow)
    */
   async signInWithGoogle(options?: { redirectTo?: string }) {
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    const clientId = getGoogleClientId();
     if (!clientId) {
       throw new Error('Google OAuth Client ID is not configured.');
     }
@@ -359,7 +415,7 @@ export const authService = {
   async signOut() {
     clearAllAccountData();
     try {
-      await fetch(`${API_BASE_URL}/auth/logout`, { method: 'POST' }).catch(() => {});
+      await authFetch('/auth/logout', { method: 'POST' }).catch(() => {});
     } catch (_) {}
     notifyAuthSubscribers('SIGNED_OUT', null);
     if (typeof window !== 'undefined') {

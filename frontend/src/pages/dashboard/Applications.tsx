@@ -23,10 +23,14 @@ import {
 
 interface Application {
   id: number;
+  reference_id?: string;
   title: string;
   company: string;
   url: string;
   status: string;
+  delivery_status?: string;
+  delivery_channel?: string;
+  delivery_details?: string;
   applied_date: string;
   match_score: number;
   candidate_name?: string;
@@ -34,6 +38,7 @@ interface Application {
   resume_url?: string;
   resume_filename?: string;
   location?: string;
+  cover_letter?: string;
   interview_scheduled_at?: string;
   interview_meeting_link?: string;
   interview_round?: string;
@@ -73,10 +78,15 @@ const Applications = () => {
       const data = await applicationService.getApplications();
       const mapped = (data.applications || []).map((a: any, idx: number) => ({
         id: Number(a.id) || idx + 1,
+        reference_id: a.reference_id || `AAH-APP-2026-${a.id || idx + 1}`,
         title: a.title || a.job_title || "Software Engineer",
         company: a.company || a.company_name || "AutoAgentHire Partner",
         url: a.url || a.job_url || "/candidate/jobs",
         status: (a.status || "applied").toLowerCase(),
+        delivery_status: a.delivery_status || "Delivered to Employer",
+        delivery_channel: a.delivery_channel || "AutoAgentHire Portal",
+        delivery_details: a.delivery_details,
+        cover_letter: a.cover_letter,
         applied_date: a.applied_date || a.applied_at || "Recent",
         match_score: a.match_score || 92,
         resume_url: a.resume_url,
@@ -253,7 +263,7 @@ const Applications = () => {
     ? applications 
     : applications.filter(app => {
         const s = (app.status || "").toLowerCase();
-        if (filterStatus === "applied") return s === "applied" || s === "submitted";
+        if (filterStatus === "applied") return s === "applied" || s === "submitted" || s === "pending";
         if (filterStatus === "interviewing") return s === "interview" || s === "interviewing" || s === "shortlisted" || !!app.interview_meeting_link || !!app.interview_scheduled_at;
         if (filterStatus === "shortlisted") return s === "shortlisted";
         if (filterStatus === "pending") return s === "pending" || s === "reviewing" || s === "under_review";
@@ -345,98 +355,93 @@ const Applications = () => {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-[#202722]">
       {/* Header */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-3xl font-bold">My Applications</h1>
-          <Button variant="outline" size="sm">
-            <Download className="w-4 h-4 mr-2" />
-            Export
+          <h1 className="font-serif text-3xl sm:text-4xl font-normal text-[#123B32]">
+            Application Tracking
+          </h1>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-[#E6E5DC] text-xs font-semibold text-[#123B32] hover:bg-white"
+          >
+            <Download className="w-3.5 h-3.5 mr-2" />
+            Export Log
           </Button>
         </div>
-        <p className="text-muted-foreground">
-          Track all your verified job applications in one place
+        <p className="text-xs sm:text-sm text-[#777D74]">
+          Live telemetry of all your verified corporate applications, recruiter reviews, and scheduled interviews.
         </p>
       </motion.div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
         {stats.map((stat, index) => (
           <motion.div
             key={stat.label}
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: index * 0.1 }}
+            transition={{ duration: 0.4, delay: index * 0.08 }}
           >
-            <Card variant="glass">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-2">
-                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
-                  <div className="text-2xl font-bold">{stat.value}</div>
+            <div className="p-6 rounded-xl bg-white border border-[#E6E5DC] editorial-shadow flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-9 h-9 rounded-lg bg-[#F7F5EF] text-[#123B32] flex items-center justify-center border border-[#E6E5DC]">
+                  <stat.icon className="w-4 h-4" />
                 </div>
-                <div className="text-sm text-muted-foreground">{stat.label}</div>
-              </CardContent>
-            </Card>
+                <div className="font-serif text-3xl font-bold text-[#123B32]">{stat.value}</div>
+              </div>
+              <div className="text-xs font-bold text-[#777D74]">{stat.label}</div>
+            </div>
           </motion.div>
         ))}
       </div>
 
       {/* Filters */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.3 }}
+        transition={{ duration: 0.4, delay: 0.2 }}
       >
-        <Card variant="glass">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm font-medium mr-4">Filter by status:</span>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant={filterStatus === "all" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setFilterStatus("all")}
-                >
-                  All
-                </Button>
-                <Button
-                  variant={filterStatus === "applied" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setFilterStatus("applied")}
-                >
-                  Applied
-                </Button>
-                <Button
-                  variant={filterStatus === "interviewing" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setFilterStatus("interviewing")}
-                >
-                  Interviewing
-                </Button>
-                <Button
-                  variant={filterStatus === "shortlisted" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setFilterStatus("shortlisted")}
-                >
-                  Shortlisted
-                </Button>
-                <Button
-                  variant={filterStatus === "pending" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setFilterStatus("pending")}
-                >
-                  Under Review
-                </Button>
-              </div>
+        <div className="p-4 rounded-xl bg-white border border-[#E6E5DC] editorial-shadow">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Filter className="w-4 h-4 text-[#777D74]" />
+            <span className="text-xs font-bold text-[#123B32] mr-3 uppercase tracking-wider">
+              Filter by status:
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { key: "all", label: "All Requisitions" },
+                { key: "applied", label: "Submitted" },
+                { key: "interviewing", label: "Interview Scheduled" },
+                { key: "shortlisted", label: "Shortlisted" },
+                { key: "pending", label: "Under Review" },
+              ].map((f) => {
+                const isActive = filterStatus === f.key;
+                return (
+                  <Button
+                    key={f.key}
+                    variant={isActive ? "default" : "outline"}
+                    size="sm"
+                    className={`text-xs font-semibold h-8 rounded-lg ${
+                      isActive
+                        ? "bg-[#123B32] text-white hover:bg-[#1C5246]"
+                        : "border-[#E6E5DC] text-[#777D74] hover:text-[#123B32] hover:bg-[#F7F5EF]"
+                    }`}
+                    onClick={() => setFilterStatus(f.key)}
+                  >
+                    {f.label}
+                  </Button>
+                );
+              })}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </motion.div>
 
       {/* ── Scheduled Client Interviews & Google Meet Section ── */}
@@ -797,6 +802,11 @@ const Applications = () => {
                       >
                         <TableCell>
                           <div className="flex flex-col gap-1">
+                            {app.reference_id && (
+                              <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded w-fit">
+                                {app.reference_id}
+                              </span>
+                            )}
                             <div className="font-medium flex items-center gap-2">
                               {app.url ? (
                                 <a 
@@ -815,12 +825,24 @@ const Applications = () => {
                             <div className="text-sm text-muted-foreground flex items-center gap-1">
                               <Building2 className="w-3 h-3" />
                               {app.company}
+                              {app.location && <span>• {app.location}</span>}
                             </div>
                           </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-1 items-start">
                             {getStatusBadge(app.status)}
+                            {app.delivery_status && (
+                              <Badge
+                                className={
+                                  app.delivery_status === "Delivered to Employer"
+                                    ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px]"
+                                    : "bg-blue-500/15 text-blue-400 border border-blue-500/30 text-[10px]"
+                                }
+                              >
+                                {app.delivery_status}
+                              </Badge>
+                            )}
                             {app.interview_meeting_link && (
                               <Badge className="bg-primary/15 text-primary border border-primary/30 text-[10px] gap-1 px-1.5 py-0.5 whitespace-nowrap">
                                 <Video className="w-2.5 h-2.5" />

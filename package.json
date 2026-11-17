@@ -2,6 +2,8 @@
   "name": "autoagenthire-root",
   "private": true,
   "scripts": {
+    "server": "powershell -ExecutionPolicy Bypass -File ./run_backend.ps1",
+    "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend install && npm --prefix frontend run build"
   }
 }

@@ -4,7 +4,12 @@ Handles job automation, user management, and application tracking.
 """
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
+try:
+    import email_validator
+    from pydantic import EmailStr
+except ImportError:
+    EmailStr = str  # type: ignore[assignment,misc]
 from sqlalchemy.orm import Session
 import asyncio
 import logging
@@ -414,31 +419,9 @@ async def upload_resume(
                 detail="Resume file saved but failed to persist metadata to database.",
             )
 
-        # Update candidate user profile with extracted skills and details
-        try:
-            user_updates = False
-            if skills:
-                target_user.default_skills = skills
-                user_updates = True
-            if contact.get("name"):
-                target_user.full_name = contact.get("name")
-                user_updates = True
-            if contact.get("phone"):
-                setattr(target_user, "phone", contact.get("phone"))
-                user_updates = True
-            if contact.get("location"):
-                setattr(target_user, "location", contact.get("location"))
-                user_updates = True
-            if experience and isinstance(experience, list) and len(experience) > 0:
-                first_exp = experience[0]
-                if isinstance(first_exp, dict) and first_exp.get("title"):
-                    setattr(target_user, "default_experience_level", f"{first_exp.get('title')} ({len(experience)} roles)")
-                    user_updates = True
-            if user_updates:
-                db.commit()
-                db.refresh(target_user)
-        except Exception as u_err:
-            logger.warning(f"User profile auto-update note: {u_err}")
+        # NOTE: Candidate Profile is authoritative and independent.
+        # Uploading or analyzing a resume must NEVER automatically alter the User record.
+        # Explicit user confirmation via 'Review and Update Profile' is required to sync.
 
         # Record activity in AuditLog
         try:
@@ -947,6 +930,61 @@ def get_user_profile(
     }
 
 
+class ProfileSyncFromResumeRequest(BaseModel):
+    selected_fields: Dict[str, Any]
+
+
+@router.post("/candidate/profile/sync-from-resume")
+def sync_candidate_profile_from_resume(
+    body: ProfileSyncFromResumeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Explicitly updates chosen candidate profile fields from resume analysis.
+    CRITICAL DATA INTEGRITY GUARANTEE:
+    Only updates fields that the candidate explicitly reviewed, selected, and confirmed.
+    All unselected fields are preserved completely untouched.
+    """
+    allowed_fields = {
+        "full_name": "full_name",
+        "phone": "phone",
+        "location": "location",
+        "skills": "default_skills",
+        "experience": "default_experience_level",
+        "education": "education",
+        "qualification": "qualification",
+        "job_role": "default_job_role",
+        "bio": "bio",
+    }
+
+    updated: List[str] = []
+    for field_key, value in body.selected_fields.items():
+        if field_key in allowed_fields and value is not None:
+            attr_name = allowed_fields[field_key]
+            setattr(current_user, attr_name, value)
+            updated.append(field_key)
+
+    if updated:
+        db.commit()
+        db.refresh(current_user)
+
+    return {
+        "status": "success",
+        "message": f"Successfully updated {len(updated)} profile fields from resume.",
+        "updated_fields": updated,
+        "profile": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "full_name": current_user.full_name,
+            "phone": current_user.phone,
+            "location": current_user.location,
+            "skills": current_user.default_skills,
+            "experience": current_user.default_experience_level,
+        },
+    }
+
+
 # ── In-App Notifications (Account-Isolated) ───────────────────────────────────
 
 def _format_time_ago(dt: Any) -> str:
@@ -1399,27 +1437,36 @@ async def get_applications(
             for app, job in candidate_apps:
                 raw_score = app.match_score or 0.92
                 score_pct = int(raw_score * 100) if raw_score <= 1.0 else int(raw_score)
+                comp_name = app.company_name or (job.company_name if job else "AutoAgentHire Partner")
+                j_title = app.job_title or (job.title if job else "Position")
+                j_loc = app.job_location or (job.location if job else "Remote")
                 formatted_apps.append({
                     "id": app.id,
-                    "title": job.title if job else "Software Engineer",
-                    "job_title": job.title if job else "Software Engineer",
-                    "company": job.company_name if job else "AutoAgentHire Partner",
-                    "company_name": job.company_name if job else "AutoAgentHire Partner",
+                    "reference_id": app.reference_id or f"AAH-APP-#{app.id}",
+                    "title": j_title,
+                    "job_title": j_title,
+                    "company": comp_name,
+                    "company_name": comp_name,
                     "url": "/candidate/jobs",
                     "job_url": "/candidate/jobs",
                     "status": app.status or "applied",
+                    "delivery_status": app.delivery_status or "Delivered to Employer",
+                    "delivery_channel": app.delivery_channel or "AutoAgentHire Portal",
+                    "delivery_details": app.delivery_details or "",
+                    "job_type": app.job_type or ("imported" if app.imported_job_id else "recruiter"),
                     "applied_date": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
                     "applied_at": app.created_at.isoformat() if app.created_at else datetime.now(timezone.utc).isoformat(),
                     "match_score": score_pct,
                     "candidate_name": app.candidate_name,
                     "candidate_email": app.candidate_email,
                     "candidate_phone": app.candidate_phone,
+                    "cover_letter": app.cover_letter,
                     "resume_url": _normalize_app_resume_url(app.resume_url, app.resume_filename),
                     "resume_filename": app.resume_filename,
                     "cv_url": _normalize_app_resume_url(app.cv_url, app.cv_filename),
                     "cv_filename": app.cv_filename,
-                    "location": job.location if job else "Remote",
-                    "salary": job.salary_description if job else "Competitive",
+                    "location": j_loc,
+                    "salary": (job.salary_description if job else "Competitive"),
                     "interview_scheduled_at": app.interview_scheduled_at.isoformat() if getattr(app, "interview_scheduled_at", None) else None,
                     "interview_meeting_link": getattr(app, "interview_meeting_link", None),
                     "interview_round": getattr(app, "interview_round", None),

@@ -8,18 +8,38 @@ import re
 import uuid
 import json
 import asyncio
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Union
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import docx
 from pypdf import PdfReader
 from backend.database.connection import get_db
-from backend.database.models_complete import JobPosting, JobApplication, User, AuditLog, Resume
+from backend.database.models_complete import (
+    JobPosting,
+    JobApplication,
+    User,
+    AuditLog,
+    Resume,
+    ImportedJobListing,
+    CandidateJobMatch,
+)
+from backend.services.matching_service import CandidateJobMatchingService
+from backend.services.ats_intelligence_service import (
+    sanitize_resume_text,
+    categorize_skills,
+    extract_candidate_links,
+    calculate_recommended_designations,
+    calculate_ats_diagnostics,
+    calibrate_ats_for_target,
+)
 from backend.llm.gemini_service import get_gemini_service
 from backend.auth.dependencies import get_current_user, get_current_user_optional
+
+logger = logging.getLogger(__name__)
 
 # Lazy imports — do NOT load sklearn/numpy at module level (causes OOM on low-memory servers)
 # They are imported inside the endpoint function that actually needs them.
@@ -95,15 +115,28 @@ def extract_text_from_pdf(file_path: str) -> str:
 
 
 def extract_text_from_docx(file_path: str) -> str:
-    """Extract text from DOCX file"""
-    text = ""
+    """Extract text from DOCX file including both paragraphs and tables."""
+    text_blocks: List[str] = []
     try:
         doc = docx.Document(file_path)
         for para in doc.paragraphs:
-            text += para.text + "\n"
+            p_text = (para.text or "").strip()
+            if p_text:
+                text_blocks.append(p_text)
+        # Also extract table text (frequently used for skills, dates, and column layouts)
+        for table in doc.tables:
+            for row in table.rows:
+                row_cells = [(c.text or "").strip() for c in row.cells if (c.text or "").strip()]
+                if row_cells:
+                    # Deduplicate adjacent cells if merged across columns
+                    deduped: List[str] = []
+                    for c in row_cells:
+                        if not deduped or deduped[-1] != c:
+                            deduped.append(c)
+                    text_blocks.append(" | ".join(deduped))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse DOCX: {str(e)}")
-    return text
+    return "\n".join(text_blocks)
 
 
 def extract_keywords(text: str) -> List[str]:
@@ -551,6 +584,16 @@ async def apply_all_jobs(
 
 
 
+@router.get("/gemini-status")
+def get_ats_gemini_status():
+    """
+    Safe status endpoint reporting whether Gemini AI is configured.
+    CRITICAL SECURITY GUARANTEE: Never exposes the API key value.
+    """
+    service = get_gemini_service()
+    return service.get_status()
+
+
 @router.post("/parse-resume")
 async def parse_resume(
     file: UploadFile = File(...),
@@ -599,8 +642,11 @@ async def parse_resume(
             except Exception:
                 resume_text = ""
 
+        # Sanitize and normalize extracted resume text safely
+        safe_resume_text = sanitize_resume_text(resume_text)
+
         # Guard against empty/unreadable text
-        if len(resume_text.strip()) < 30:
+        if len(safe_resume_text.strip()) < 30:
             raise HTTPException(
                 status_code=400,
                 detail="Could not extract readable text from resume. Please ensure the document is not an empty or scanned image file."
@@ -608,7 +654,7 @@ async def parse_resume(
 
         # 4. Invoke Google Gemini AI Analysis
         gemini_service = get_gemini_service()
-        analysis = gemini_service.analyze_resume(resume_text, job_description)
+        analysis = gemini_service.analyze_resume(safe_resume_text, job_description)
 
         # 5. Collate all skills for matching
         skills_obj = analysis.get("skills", {})
@@ -618,37 +664,9 @@ async def parse_resume(
         
         all_skills = list(dict.fromkeys(tech_skills + prof_skills + domain_skills))
         if not all_skills:
-            all_skills = extract_skills(resume_text)
+            all_skills = extract_skills(safe_resume_text)
 
-        # 6. Fetch approved jobs from platform database for job matching
-        platform_jobs: List[Dict[str, Any]] = []
-        try:
-            db_jobs = db.query(JobPosting).filter(
-                JobPosting.status.in_(["approved", "active", "published"])
-            ).all()
-            for j in db_jobs:
-                platform_jobs.append({
-                    "id": j.id,
-                    "title": j.title,
-                    "company_name": j.company_name,
-                    "location": j.location,
-                    "salary_description": j.salary_description,
-                    "job_type": j.job_type,
-                    "skills": j.skills or "",
-                    "description": j.description or "",
-                })
-        except Exception as db_err:
-            print(f"[ATS] Database job fetch note: {db_err}")
-
-        # Calculate matching jobs grounded in real vacancies and candidate experience
-        matched_jobs = gemini_service.match_candidate_against_jobs(
-            candidate_skills=all_skills,
-            jobs=platform_jobs,
-            candidate_experience=analysis.get("total_experience"),
-            resume_text=resume_text
-        )
-
-        # 7. Persist to authenticated candidate's account (Account Isolation)
+        # 6. Persist to authenticated candidate's account first (Account Isolation)
         saved_resume_id = None
         if current_user:
             try:
@@ -672,7 +690,7 @@ async def parse_resume(
                     file_path=permanent_path,
                     file_size_bytes=len(content),
                     file_type=file_ext,
-                    raw_text=resume_text,
+                    raw_text=safe_resume_text,
                     parsed_data=analysis,
                     full_name=analysis.get("candidate_name") or current_user.full_name,
                     email=analysis.get("email") or current_user.email,
@@ -689,13 +707,9 @@ async def parse_resume(
                 )
                 db.add(new_resume)
 
-                # Update candidate user record
-                if all_skills:
-                    setattr(current_user, "default_skills", all_skills)
-                if analysis.get("candidate_name") and not current_user.full_name:
-                    setattr(current_user, "full_name", analysis.get("candidate_name"))
-                if analysis.get("phone") and not current_user.phone:
-                    setattr(current_user, "phone", analysis.get("phone"))
+                # NOTE: Candidate Profile is authoritative and independent.
+                # Uploading or analyzing a resume must NEVER automatically alter the User record.
+                # Explicit user confirmation via 'Review and Update Profile' is required to sync.
 
                 db.commit()
                 db.refresh(new_resume)
@@ -704,9 +718,102 @@ async def parse_resume(
                 db.rollback()
                 print(f"[ATS] Error persisting resume to user account: {persist_err}")
 
+        # 7. Evaluate candidate profile against all active platform and imported jobs
+        # using the 6-factor deterministic scoring model
+        matched_jobs: List[Dict[str, Any]] = []
+        if current_user and saved_resume_id:
+            try:
+                matched_jobs = CandidateJobMatchingService.calculate_and_persist_candidate_matches(
+                    user_id=current_user.id,
+                    db=db,
+                    resume_id=saved_resume_id,
+                )
+            except Exception as match_err:
+                print(f"[ATS] Match calculation note: {match_err}")
+
+        if not matched_jobs:
+            # Fallback evaluation for guest parse or if unauthenticated
+            candidate_profile = {
+                "skills": all_skills,
+                "total_experience": analysis.get("total_experience"),
+                "summary": analysis.get("professional_summary"),
+                "location": analysis.get("location"),
+                "education": analysis.get("education", []),
+                "raw_text": resume_text,
+            }
+            # Retrieve real active jobs from SQLite
+            active_imported = db.query(ImportedJobListing).filter(ImportedJobListing.status == "active").all()
+            for imp in active_imported:
+                target_job = {
+                    "id": imp.id,
+                    "job_type": "imported",
+                    "title": imp.title,
+                    "company_name": imp.company_name,
+                    "company_logo_url": imp.company_logo_url,
+                    "description": imp.description or "",
+                    "location": imp.location or "Remote",
+                    "workplace_type": imp.workplace_type or "remote",
+                    "employment_type": imp.employment_type or "Full-time",
+                    "salary": imp.salary or "Competitive",
+                    "skills": imp.skills or [],
+                    "job_posting_url": imp.job_posting_url,
+                    "source": imp.provider,
+                }
+                score_res = CandidateJobMatchingService.score_candidate_job(candidate_profile, target_job)
+                matched_jobs.append({
+                    "id": str(imp.id),
+                    "job_id": imp.id,
+                    "job_type": "imported",
+                    "title": imp.title,
+                    "company": imp.company_name,
+                    "company_logo_url": imp.company_logo_url,
+                    "location": imp.location,
+                    "workplace_type": imp.workplace_type,
+                    "employment_type": imp.employment_type,
+                    "salary_range": imp.salary or "Competitive",
+                    "salary": imp.salary or "Competitive",
+                    "job_posting_url": imp.job_posting_url,
+                    "source": imp.provider,
+                    "match_percentage": score_res["match_percentage"],
+                    "matching_skills": score_res["matching_skills"],
+                    "missing_skills": score_res["missing_skills"],
+                    "experience_compatibility": score_res["experience_compatibility"],
+                    "suitability_reason": score_res["suitability_reason"],
+                    "improvement_suggestions": score_res["improvement_suggestions"],
+                    "score_breakdown": score_res["score_breakdown"],
+                    "description": imp.description[:350] + "..." if len(imp.description or "") > 350 else imp.description,
+                    "applied": False,
+                })
+            matched_jobs.sort(key=lambda x: x["match_percentage"], reverse=True)
+
         # 8. Clean up temporary upload file
         if os.path.exists(file_path):
             os.remove(file_path)
+
+        # 9. Derive deep candidate intelligence & ATS calibration
+        candidate_links = extract_candidate_links(safe_resume_text)
+        linkedin_url = analysis.get("linkedin_url") or candidate_links.get("linkedin_url")
+        github_url = analysis.get("github_url") or candidate_links.get("github_url")
+        portfolio_url = analysis.get("portfolio_url") or candidate_links.get("portfolio_url")
+
+        categorized_skills = categorize_skills(all_skills)
+        recommended_designations = calculate_recommended_designations(
+            candidate_skills=all_skills,
+            total_experience_str=analysis.get("total_experience"),
+            resume_text=safe_resume_text,
+            education=analysis.get("education"),
+            projects=analysis.get("key_projects"),
+        )
+        ats_analysis = calculate_ats_diagnostics(
+            resume_text=safe_resume_text,
+            candidate_name=analysis.get("candidate_name") or "Candidate",
+            email=analysis.get("email"),
+            phone=analysis.get("phone"),
+            location=analysis.get("location"),
+            skills=all_skills,
+            experience=analysis.get("employment_history"),
+            education=analysis.get("education"),
+        )
 
         return {
             "status": "success",
@@ -718,6 +825,9 @@ async def parse_resume(
             "email": analysis.get("email") or "",
             "phone": analysis.get("phone") or "",
             "location": analysis.get("location"),
+            "linkedin_url": linkedin_url,
+            "github_url": github_url,
+            "portfolio_url": portfolio_url,
             "professional_summary": analysis.get("professional_summary") or "",
             "total_experience": analysis.get("total_experience") or "Experience inferred",
             "skills": {
@@ -726,6 +836,7 @@ async def parse_resume(
                 "domain": domain_skills,
             },
             "all_skills": all_skills,
+            "categorized_skills": categorized_skills,
             "education": analysis.get("education", []),
             "certifications": analysis.get("certifications", []),
             "employment_history": analysis.get("employment_history", []),
@@ -735,22 +846,35 @@ async def parse_resume(
             "career_highlights": analysis.get("career_highlights", []),
             "suggested_improvements": analysis.get("suggested_improvements", []),
             "facts_vs_inferences": analysis.get("facts_vs_inferences", {"explicit_facts": [], "inferences": []}),
+            "recommended_designations": recommended_designations,
+            "ats_analysis": ats_analysis,
             "keywords": analysis.get("keywords", []),
             "job_match": analysis.get("job_match", {}),
             "matched_jobs": matched_jobs,
-            "text": resume_text,
-            "length": len(resume_text),
+            "text": safe_resume_text,
+            "length": len(safe_resume_text),
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "parsed_data": {
                 "contact": {
                     "name": analysis.get("candidate_name"),
                     "email": analysis.get("email"),
                     "phone": analysis.get("phone"),
+                    "location": analysis.get("location"),
+                    "linkedin_url": linkedin_url,
+                    "github_url": github_url,
+                    "portfolio_url": portfolio_url,
                 },
                 "skills": all_skills,
+                "categorized_skills": categorized_skills,
                 "experience": analysis.get("employment_history", []),
                 "education": analysis.get("education", []),
+                "projects": analysis.get("key_projects", []),
+                "certifications": analysis.get("certifications", []),
+                "achievements": analysis.get("career_highlights", []) or analysis.get("strengths", []),
                 "summary": analysis.get("professional_summary", ""),
+                "total_experience": analysis.get("total_experience"),
+                "recommended_designations": recommended_designations,
+                "ats_analysis": ats_analysis,
             }
         }
 
@@ -761,8 +885,44 @@ async def parse_resume(
     except Exception as e:
         if os.path.exists(file_path):
             os.remove(file_path)
-        print(f"[ATS] Error parsing resume: {e}")
+        logger.error("[ATS] Error parsing resume: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Resume processing error: {str(e)}")
+
+
+class CalibrateTargetRequest(BaseModel):
+    target_designation: str
+    resume_text: Optional[str] = None
+    skills: Optional[List[str]] = None
+    job_description: Optional[str] = None
+
+
+@router.post("/calibrate-target")
+def calibrate_target_route(
+    body: CalibrateTargetRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """
+    Perform targeted ATS analysis for a specific career designation or job requisition.
+    Compares candidate profile against target requirements and returns exact matching keywords,
+    critical missing keywords, and tailored optimization recommendations.
+    """
+    resume_text = body.resume_text or ""
+    skills = body.skills or []
+
+    if not resume_text and current_user:
+        active_res = db.query(Resume).filter(Resume.user_id == current_user.id, Resume.is_active == True).first()
+        if active_res:
+            resume_text = active_res.raw_text or ""
+            if not skills and active_res.skills:
+                skills = active_res.skills
+
+    return calibrate_ats_for_target(
+        resume_text=resume_text,
+        target_designation=body.target_designation,
+        candidate_skills=skills,
+        job_description=body.job_description,
+    )
 
 
 class OptimizeResumeRequest(BaseModel):
@@ -857,6 +1017,7 @@ async def optimize_resume(
 
 
 @router.get("/current-profile")
+@router.get("/profile")
 def get_current_ats_profile(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -896,31 +1057,17 @@ def get_current_ats_profile(
     if not all_skills and latest_resume.skills:
         all_skills = [str(s) for s in latest_resume.skills] if isinstance(latest_resume.skills, list) else [str(latest_resume.skills)]
 
-    # Match real approved jobs
-    platform_jobs = []
+    # Match real active jobs across all connected integrations and recruiter requisitions
+    matched_jobs = []
     try:
-        db_jobs = db.query(JobPosting).filter(JobPosting.status == "approved").all()
-        for j in db_jobs:
-            platform_jobs.append({
-                "id": j.id,
-                "title": j.title,
-                "company_name": j.company_name,
-                "location": j.location,
-                "salary_description": j.salary_description,
-                "job_type": j.job_type,
-                "skills": j.skills or "",
-                "description": j.description or "",
-            })
-    except Exception:
-        pass
+        matched_jobs = CandidateJobMatchingService.get_candidate_matches(
+            user_id=current_user.id,
+            db=db,
+        )
+    except Exception as match_err:
+        logger.warning(f"Failed to retrieve candidate job matches via matching service: {match_err}")
 
     gemini_svc = get_gemini_service()
-    matched_jobs = gemini_svc.match_candidate_against_jobs(
-        candidate_skills=all_skills,
-        jobs=platform_jobs,
-        candidate_experience=str(parsed.get("total_experience") or f"{latest_resume.years_of_experience or 1}+ years"),
-        resume_text=str(latest_resume.raw_text or "")
-    )
 
     return {
         "has_profile": True,
@@ -952,6 +1099,91 @@ def get_current_ats_profile(
         "matched_jobs": matched_jobs,
         "last_updated": latest_resume.updated_at.isoformat() if latest_resume.updated_at else None,
     }
+
+
+@router.get("/matched-jobs", summary="Get personalized matched jobs for authenticated candidate")
+def get_matched_jobs(
+    min_threshold: Optional[int] = Query(None, ge=0, le=100, description="Minimum match percentage"),
+    category: Optional[str] = Query(None, description="Category filter: 'all', '90plus', '80to89', 'applied'"),
+    force: bool = Query(False, description="Force recalculate matches"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns ranked matching jobs tailored to the authenticated candidate's parsed resume.
+    Uses the 6-factor deterministic scoring model against real ATS integrations and partner requisitions.
+    """
+    clean_threshold: Optional[int] = (
+        int(min_threshold)
+        if isinstance(min_threshold, (int, float)) and not hasattr(min_threshold, "default")
+        else None
+    )
+    clean_category: Optional[str] = (
+        str(category).strip().lower()
+        if isinstance(category, str) and not hasattr(category, "default") and category.strip() and category.strip().lower() != "all"
+        else None
+    )
+    clean_force: bool = (
+        bool(force)
+        if isinstance(force, bool) and not hasattr(force, "default")
+        else False
+    )
+
+    try:
+        if clean_force:
+            matches = CandidateJobMatchingService.calculate_and_persist_candidate_matches(
+                user_id=current_user.id,
+                db=db,
+            )
+            if clean_threshold is not None:
+                matches = [m for m in matches if m["match_percentage"] >= clean_threshold]
+            if clean_category:
+                if clean_category == "90plus":
+                    matches = [m for m in matches if m["match_percentage"] >= 90]
+                elif clean_category in ("80to89", "80plus"):
+                    matches = [m for m in matches if 80 <= m["match_percentage"] < 90]
+                elif clean_category == "applied":
+                    matches = [m for m in matches if m["applied"]]
+            return {"total": len(matches), "jobs": matches}
+
+        matches = CandidateJobMatchingService.get_candidate_matches(
+            user_id=current_user.id,
+            db=db,
+            min_threshold=clean_threshold,
+            category=clean_category,
+        )
+        return {"total": len(matches), "jobs": matches}
+    except Exception as exc:
+        logger.warning(f"Error fetching matched jobs for candidate user_id={current_user.id}: {exc}")
+        return {"total": 0, "jobs": []}
+
+
+@router.post("/jobs/{job_id}/apply", summary="Mark job application submitted for candidate match")
+def mark_job_match_applied(
+    job_id: int,
+    job_type: str = Query("imported", description="'imported' or 'recruiter'"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a matched job as applied by the current candidate."""
+    clean_job_type = str(job_type).strip().lower() if isinstance(job_type, str) and not hasattr(job_type, "default") else "imported"
+    now = datetime.now(timezone.utc)
+    match_rec = (
+        db.query(CandidateJobMatch)
+        .filter(
+            CandidateJobMatch.user_id == current_user.id,
+            CandidateJobMatch.job_id == job_id,
+            CandidateJobMatch.job_type == clean_job_type,
+        )
+        .first()
+    )
+    if match_rec:
+        match_rec.applied = True
+        match_rec.applied_at = now
+        db.commit()
+        return {"success": True, "message": f"Application recorded for job #{job_id}", "applied": True}
+
+    return {"success": True, "message": "Application recorded", "applied": True}
 
 
 

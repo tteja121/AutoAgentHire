@@ -10,8 +10,14 @@ import logging
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from dotenv import load_dotenv
-import google.generativeai as genai  # type: ignore
-from google.generativeai.types import GenerationConfig  # type: ignore
+try:
+    import google.generativeai as genai  # type: ignore
+    from google.generativeai.types import GenerationConfig  # type: ignore
+    GEMINI_PACKAGE_AVAILABLE = True
+except ImportError:
+    genai = None  # type: ignore
+    GenerationConfig = None  # type: ignore
+    GEMINI_PACKAGE_AVAILABLE = False
 
 # Dynamically locate and load from backend/.env and root .env (backend/.env has precedence)
 _backend_dir = Path(__file__).resolve().parent.parent
@@ -136,6 +142,8 @@ class GeminiService:
         """
         if api_key is not None:
             self.api_key = api_key.strip()
+        elif os.getenv("TESTING") == "true" and os.getenv("ALLOW_ONLINE_TESTING") != "true":
+            self.api_key = ""
         else:
             self.api_key = (
                 os.getenv("GEMINI_API_KEY")
@@ -147,8 +155,8 @@ class GeminiService:
         self.temperature = temperature
         self.model = None
 
-        if not self.api_key or self.api_key in ("your-gemini-api-key", "your_gemini_api_key_here", ""):
-            logger.info("GEMINI_API_KEY not configured. Local AI fallback heuristic analyzer is active.")
+        if not self.api_key or not GEMINI_PACKAGE_AVAILABLE or self.api_key in ("your-gemini-api-key", "your_gemini_api_key_here", ""):
+            logger.info("GEMINI_API_KEY not configured or library unavailable. Local AI fallback heuristic analyzer is active.")
             self.model = None
         else:
             try:
@@ -159,6 +167,32 @@ class GeminiService:
             except Exception as e:
                 logger.warning(f"Failed to initialize Google Gemini client with {self.model_name}: {e}")
                 self.model = None
+
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Safe configuration status report.
+        Reports whether a valid Gemini API key is configured and client initialized.
+        CRITICAL SECURITY REQUIREMENT: NEVER exposes or leaks the API key value.
+        """
+        has_key = bool(self.api_key and self.api_key not in ("your-gemini-api-key", "your_gemini_api_key_here", ""))
+        status_code = "ready" if (has_key and self.model is not None) else ("missing_key" if not has_key else "init_failed")
+        message = (
+            f"Google Gemini AI active ({self.model_name})"
+            if status_code == "ready"
+            else (
+                "Google Gemini API key (GEMINI_API_KEY) is not set in backend/.env. Built-in parsing engine active."
+                if not has_key
+                else "Google Gemini API key configured, but client initialization failed or quota was reached."
+            )
+        )
+        return {
+            "configured": has_key,
+            "package_available": GEMINI_PACKAGE_AVAILABLE,
+            "model": self.model_name,
+            "provider": "google-gemini",
+            "status": status_code,
+            "message": message,
+        }
 
     def _generate_with_fallback(
         self,
@@ -211,7 +245,8 @@ class GeminiService:
         Extracts structured candidate intelligence, categorizes skills,
         and distinguishes explicitly stated facts from inferences.
         """
-        safe_resume_text = (resume_text or "").strip()[:10000]
+        from backend.services.ats_intelligence_service import sanitize_resume_text
+        safe_resume_text = sanitize_resume_text(resume_text, max_chars=35000)
         if not safe_resume_text:
             return {
                 "status": "error",
@@ -373,11 +408,20 @@ Return a single VALID JSON object (with NO other text outside JSON) adhering str
         Rule-based heuristic fallback analysis when Gemini is unconfigured or unavailable.
         Ensures the application never crashes and always returns structured data.
         """
-        lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
+        from backend.services.ats_intelligence_service import (
+            sanitize_resume_text,
+            categorize_skills,
+            extract_candidate_links,
+            calculate_recommended_designations,
+            calculate_ats_diagnostics,
+        )
+
+        safe_resume_text = sanitize_resume_text(resume_text, max_chars=35000)
+        lines = [line.strip() for line in safe_resume_text.splitlines() if line.strip()]
 
         # Heuristic contact extraction
-        email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', resume_text)
-        phone_match = re.search(r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', resume_text)
+        email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', safe_resume_text)
+        phone_match = re.search(r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', safe_resume_text)
 
         # Name heuristic: typically first non-empty line with 2-4 words
         inferred_name = None
@@ -404,7 +448,7 @@ Return a single VALID JSON object (with NO other text outside JSON) adhering str
             "devops engineering", "frontend architecture"
         ]
 
-        text_lower = resume_text.lower()
+        text_lower = safe_resume_text.lower()
         found_tech = [CANONICAL_SKILL_NAMES.get(s, s.title()) for s in tech_dict if s in text_lower]
         found_prof = [s.title() for s in prof_dict if s in text_lower]
         found_domain = [s.title() for s in domain_dict if s in text_lower]
@@ -469,16 +513,41 @@ Return a single VALID JSON object (with NO other text outside JSON) adhering str
                 "set GEMINI_API_KEY in backend/.env."
             )
 
+        from backend.services.ats_intelligence_service import (
+            categorize_skills,
+            extract_candidate_links,
+            calculate_recommended_designations,
+            calculate_ats_diagnostics,
+        )
+
+        all_detected_skills = list(dict.fromkeys(found_tech + found_prof + found_domain))
+        links = extract_candidate_links(safe_resume_text)
+        cat_skills = categorize_skills(all_detected_skills)
+        rec_designations = calculate_recommended_designations(
+            candidate_skills=all_detected_skills,
+            total_experience_str=inferred_exp,
+            resume_text=safe_resume_text,
+        )
+        ats_diag = calculate_ats_diagnostics(
+            resume_text=safe_resume_text,
+            candidate_name=inferred_name,
+            email=email_match.group(0) if email_match else None,
+            phone=phone_match.group(0) if phone_match else None,
+            skills=all_detected_skills,
+        )
+
         return {
             "status": "success",
             "ai_powered": False,
+            "model_used": "builtin-local-heuristics",
             "config_message": config_msg,
             "candidate_name": inferred_name or "Professional Candidate",
             "email": email_match.group(0) if email_match else None,
             "phone": phone_match.group(0) if phone_match else None,
             "location": None,
-            "linkedin_url": None,
-            "portfolio_url": None,
+            "linkedin_url": links.get("linkedin_url"),
+            "github_url": links.get("github_url"),
+            "portfolio_url": links.get("portfolio_url"),
             "professional_summary": (
                 f"Candidate with evidenced proficiency in {', '.join(found_tech[:5]) or 'modern technologies'}. "
                 f"Demonstrated background in software development, clean architecture, and technical problem solving."
@@ -489,6 +558,10 @@ Return a single VALID JSON object (with NO other text outside JSON) adhering str
                 "professional": found_prof or ["Agile Collaboration", "Technical Communication", "Code Review"],
                 "domain": found_domain or ["Web Application Engineering", "Cloud Infrastructure"],
             },
+            "all_skills": all_detected_skills,
+            "categorized_skills": cat_skills,
+            "recommended_designations": rec_designations,
+            "ats_analysis": ats_diag,
             "education": [
                 {
                     "degree": "Bachelor of Technology / Science in Computer Science",

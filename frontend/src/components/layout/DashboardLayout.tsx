@@ -2,22 +2,22 @@ import { useState, useEffect, useRef } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Bot, LayoutDashboard, FileText, Search, Briefcase, Settings, HelpCircle,
-  LogOut, Menu, X, Bell, ChevronDown, User, Star, Play, CheckCircle2,
-  Sparkles, ExternalLink, ShieldCheck, Check, Trash2
+  Sparkles, LayoutDashboard, FileText, Search, Briefcase, Settings,
+  LogOut, Menu, X, Bell, ChevronDown, User, Play, CheckCircle2,
+  ExternalLink, ShieldCheck, Check, Trash2, Bot, GraduationCap
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { apiClient, API_ENDPOINTS } from "@/lib/api";
 import { authService } from "@/services/authService";
 
 const sidebarLinks = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Browse Jobs", href: "/candidate/jobs", icon: Search },
-  { name: "Applications", href: "/dashboard/applications", icon: Briefcase },
-  { name: "Job Automation", href: "/dashboard/automation", icon: Play },
-  { name: "Resume Parser", href: "/dashboard/resume", icon: FileText },
-  { name: "Profile", href: "/dashboard/profile", icon: User },
+  { name: "Executive Overview", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Curated Opportunities", href: "/candidate/jobs", icon: Search },
+  { name: "Application Tracking", href: "/dashboard/applications", icon: Briefcase },
+  { name: "Autonomous Agent", href: "/dashboard/automation", icon: Play },
+  { name: "Resume & ATS Calibration", href: "/dashboard/resume", icon: FileText },
+  { name: "Practice", href: "/dashboard/practice", icon: GraduationCap },
+  { name: "Candidate Profile", href: "/dashboard/profile", icon: User },
 ];
 
 interface NotificationItem {
@@ -74,7 +74,7 @@ export const DashboardLayout = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  // Helpers for instantaneous localStorage hydration of read status
+
   const getCachedReadIds = (): Set<string> => {
     try {
       const stored = localStorage.getItem("read_notification_ids");
@@ -100,104 +100,101 @@ export const DashboardLayout = () => {
       ids.forEach((id) => set.add(String(id)));
       localStorage.setItem("read_notification_ids", JSON.stringify(Array.from(set)));
     } catch (e) {
-      console.warn("Could not cache read notification ids:", e);
+      console.warn("Could not batch cache read notification ids:", e);
     }
   };
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     const cached = getCachedReadIds();
-    return defaultNotifications.map((n) => (cached.has(n.id) ? { ...n, read: true } : n));
+    return defaultNotifications.map((n) => ({
+      ...n,
+      read: cached.has(n.id) ? true : n.read,
+    }));
   });
-  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  const [currentUser, setCurrentUser] = useState<{
+    full_name?: string;
+    email?: string;
+    avatar_url?: string;
+    role?: string;
+  } | null>(null);
 
   const location = useLocation();
   const navigate = useNavigate();
-
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
-  // Fetch persistent notifications from backend database
-  const loadNotifications = async () => {
-    try {
-      const resp = await apiClient.get(API_ENDPOINTS.notifications.list);
-      const serverNotifs = resp.data?.notifications || (Array.isArray(resp.data) ? resp.data : []);
-      if (Array.isArray(serverNotifs) && serverNotifs.length > 0) {
-        const cached = getCachedReadIds();
-        const mapped: NotificationItem[] = serverNotifs.map((item: any) => {
-          const isRead = Boolean(item.read || cached.has(String(item.id)) || (item.uuid && cached.has(String(item.uuid))));
-          return {
-            id: String(item.id),
-            title: item.title,
-            message: item.message,
-            time: item.time || "New",
-            read: isRead,
-            type: item.type || "system",
-            actionHref: item.actionHref || item.action_href,
-          };
-        });
-        setNotifications(mapped);
-      }
-    } catch (err) {
-      console.warn("Could not load backend notifications:", err);
-    }
-  };
-
-  // Initial load of backend notifications
-  useEffect(() => {
-    loadNotifications();
-  }, []);
-
-  // Fetch current user details
   useEffect(() => {
     let isMounted = true;
-
     const fetchUser = async () => {
-      // Fetch active user profile from backend
       try {
-        const resp = await apiClient.get(API_ENDPOINTS.auth.me);
-        if (resp.data && isMounted) {
-          setCurrentUser((prev: any) => ({
-            ...prev,
-            ...resp.data,
-          }));
+        const storedName = localStorage.getItem("candidate_name");
+        const storedEmail = localStorage.getItem("candidate_email");
+        const storedAvatar = localStorage.getItem("candidate_avatar_url");
+
+        if (storedName || storedEmail) {
+          if (isMounted) {
+            setCurrentUser({
+              full_name: storedName || "Candidate",
+              email: storedEmail || "candidate@autoagenthire.com",
+              avatar_url: storedAvatar || undefined,
+            });
+          }
         }
-      } catch (err) {
-        if (isMounted) {
-          setCurrentUser((prev: any) => {
-            if (prev?.email) return prev;
-            const role = localStorage.getItem("userRole") || "candidate";
-            return {
-              full_name: "Candidate User",
-              email: "candidate@autoagenthire.com",
-              role,
-            };
+
+        const userRes = await authService.getCurrentUser();
+        if (userRes && isMounted) {
+          const profileData = (userRes as any).profile || (userRes as any).user || userRes;
+          setCurrentUser({
+            full_name: profileData?.full_name || storedName || "Candidate",
+            email: profileData?.email || (userRes as any).user?.email || storedEmail || "candidate@autoagenthire.com",
+            avatar_url: profileData?.avatar_url || storedAvatar || undefined,
+            role: (userRes as any).role,
           });
         }
+      } catch (err) {
+        console.warn("Could not fetch user profile:", err);
       }
     };
-
     fetchUser();
-
     return () => {
       isMounted = false;
     };
   }, []);
 
-  // Real-time notifications for newly uploaded job posts
   useEffect(() => {
     let isMounted = true;
+
+    const loadNotifications = async () => {
+      try {
+        const res = await apiClient.get<NotificationItem[]>(API_ENDPOINTS.notifications.list);
+        if (res && Array.isArray(res) && isMounted) {
+          const cached = getCachedReadIds();
+          setNotifications(
+            res.map((item) => ({
+              ...item,
+              read: cached.has(item.id) ? true : item.read,
+            }))
+          );
+        }
+      } catch (err) {
+        console.warn("Could not fetch remote notifications:", err);
+      }
+    };
+
+    loadNotifications();
+
     const loadJobNotifications = async () => {
       try {
-        const resp = await apiClient.get(API_ENDPOINTS.recruiter.candidateJobs);
-        const jobs = resp.data || [];
-        if (Array.isArray(jobs) && jobs.length > 0 && isMounted) {
+        const jobs = await apiClient.get<any[]>(API_ENDPOINTS.recruiter.candidateJobs);
+        if (jobs && Array.isArray(jobs) && jobs.length > 0 && isMounted) {
           const cached = getCachedReadIds();
-          const jobNotifs: NotificationItem[] = jobs.slice(0, 5).map((job: any, idx: number) => {
-            const id = `job-post-notif-${job.id || idx}`;
+          const jobNotifs: NotificationItem[] = jobs.slice(0, 3).map((job) => {
+            const id = `job-notif-${job.id || job.uuid}`;
             return {
               id,
-              title: `New Job Opportunity: ${job.title}`,
-              message: `${job.company_name} uploaded a verified job opening (${job.vacancies || 1} vacancy - ${job.job_type || 'Full-time'} in ${job.location || 'Remote'}). Tap to explore & apply.`,
+              title: `Opportunity: ${job.title}`,
+              message: `${job.company_name} published a verified role (${job.vacancies || 1} openings - ${job.job_type || "Full-time"}). Tap to apply.`,
               time: "New",
               read: cached.has(id),
               type: "job",
@@ -205,9 +202,9 @@ export const DashboardLayout = () => {
             };
           });
 
-          setNotifications(prev => {
-            const incomingIds = new Set(jobNotifs.map(j => j.id));
-            const retained = prev.filter(p => !incomingIds.has(p.id) && p.id !== "notif-1");
+          setNotifications((prev) => {
+            const incomingIds = new Set(jobNotifs.map((j) => j.id));
+            const retained = prev.filter((p) => !incomingIds.has(p.id) && p.id !== "notif-1");
             return [...jobNotifs, ...retained];
           });
         }
@@ -232,7 +229,6 @@ export const DashboardLayout = () => {
     };
   }, []);
 
-  // Close dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
@@ -255,11 +251,8 @@ export const DashboardLayout = () => {
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const markAllAsRead = async () => {
-    // 1. Instant optimistic state update
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    // 2. Cache in localStorage
     addCachedReadIds(notifications.map((n) => n.id));
-    // 3. Persist to backend database
     try {
       await apiClient.post(API_ENDPOINTS.notifications.markAllRead);
     } catch (err) {
@@ -268,9 +261,7 @@ export const DashboardLayout = () => {
   };
 
   const clearAllNotifications = async () => {
-    // 1. Instant optimistic state update
     setNotifications([]);
-    // 2. Clear backend database
     try {
       await apiClient.delete(API_ENDPOINTS.notifications.clearAll);
     } catch (err) {
@@ -279,13 +270,10 @@ export const DashboardLayout = () => {
   };
 
   const markSingleAsRead = async (id: string) => {
-    // 1. Instant optimistic state update
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
-    // 2. Cache in localStorage for immediate hydration
     addCachedReadId(id);
-    // 3. Persist to backend database
     try {
       await apiClient.post(API_ENDPOINTS.notifications.markRead(id));
     } catch (err) {
@@ -299,76 +287,111 @@ export const DashboardLayout = () => {
       if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
       return parts[0].slice(0, 2).toUpperCase();
     }
-    if (currentUser?.email) {
-      return currentUser.email.slice(0, 2).toUpperCase();
-    }
     return "CA";
   };
 
   const getPageTitle = () => {
-    if (location.pathname === "/candidate/jobs" || location.pathname === "/dashboard/jobs") {
-      return "Browse Jobs";
-    }
-    const match = sidebarLinks.find((l) => l.href === location.pathname);
-    return match?.name || "Candidate Dashboard";
+    const path = location.pathname;
+    if (path.includes("/candidate/jobs") || path.includes("/dashboard/jobs")) return "Curated Opportunities";
+    if (path.includes("/dashboard/applications")) return "Application Tracking";
+    if (path.includes("/dashboard/automation")) return "Autonomous Agent Control";
+    if (path.includes("/dashboard/resume")) return "ATS Diagnostic & Resume Suite";
+    if (path.includes("/dashboard/profile")) return "Candidate Credentials";
+    return "Executive Overview";
   };
 
   return (
-    <div className="min-h-screen bg-background flex">
-      {/* Sidebar - Desktop */}
+    <div className="min-h-screen bg-[#F7F5EF] text-[#202722] flex">
+      {/* Deep Forest Green Editorial Desktop Sidebar */}
       <aside
-        className={`hidden lg:flex flex-col fixed inset-y-0 left-0 z-40 bg-card/90 backdrop-blur-xl border-r border-white/5 transition-all duration-300 ${
+        className={`hidden lg:flex flex-col fixed inset-y-0 left-0 z-40 bg-[#123B32] text-[#F7F5EF] border-r border-[#123B32]/40 transition-all duration-300 ${
           sidebarOpen ? "w-64" : "w-20"
         }`}
       >
-        {/* Logo */}
-        <div className="h-16 flex items-center justify-between px-4 border-b border-white/5">
+        {/* Brand Header */}
+        <div className="h-20 flex items-center justify-between px-5 border-b border-white/10">
           <Link to="/dashboard" className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center flex-shrink-0 shadow-md shadow-primary/20">
-              <Bot className="w-6 h-6 text-primary-foreground" />
+            <div className="w-10 h-10 rounded-lg bg-[#FF7058] text-white flex items-center justify-center shrink-0 shadow-sm">
+              <Sparkles className="w-5 h-5" />
             </div>
             {sidebarOpen && (
               <div className="flex flex-col">
-                <span className="text-base font-bold tracking-tight">AutoAgentHire</span>
-                <span className="text-[10px] text-primary font-medium tracking-wide">Candidate Portal</span>
+                <span className="font-serif text-lg font-bold tracking-tight text-[#F7F5EF] leading-tight">
+                  AutoAgentHire
+                </span>
+                <span className="text-[10px] text-[#A9BBA7] font-semibold tracking-wider uppercase">
+                  Candidate Portal
+                </span>
               </div>
             )}
           </Link>
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-foreground transition-colors"
+            className="p-1.5 rounded-md hover:bg-white/10 text-[#A9BBA7] hover:text-white transition-colors"
             title={sidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Navigation */}
+        {/* Sidebar Navigation */}
         <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
           {sidebarLinks.map((link) => {
             const isActive =
               location.pathname === link.href ||
-              (link.href === "/candidate/jobs" && (location.pathname === "/candidate/jobs" || location.pathname === "/dashboard/jobs"));
+              (link.href === "/candidate/jobs" &&
+                (location.pathname === "/candidate/jobs" || location.pathname === "/dashboard/jobs"));
 
             return (
               <Link
                 key={link.name}
                 to={link.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
+                className={`flex items-center gap-3 px-3.5 py-3 rounded-lg text-xs font-semibold tracking-wide transition-all ${
                   isActive
-                    ? "bg-primary text-primary-foreground font-semibold shadow-md shadow-primary/20"
-                    : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                    ? "bg-white/10 text-[#F7F5EF] border-l-2 border-[#FF7058] shadow-xs"
+                    : "text-[#A9BBA7] hover:bg-white/5 hover:text-white"
                 }`}
               >
-                <link.icon className="w-5 h-5 flex-shrink-0" />
-                {sidebarOpen && <span className="font-medium text-sm">{link.name}</span>}
+                <link.icon className={`w-4 h-4 shrink-0 ${isActive ? "text-[#FF7058]" : ""}`} />
+                {sidebarOpen && <span className="truncate">{link.name}</span>}
               </Link>
             );
           })}
         </nav>
+
+        {/* Bottom Profile / Sign Out in Sidebar */}
+        <div className="p-4 border-t border-white/10 mt-auto">
+          {sidebarOpen ? (
+            <div className="flex items-center justify-between text-xs">
+              <div className="min-w-0 pr-2">
+                <span className="block font-semibold text-white truncate">
+                  {currentUser?.full_name?.split(" ")[0] || "Candidate"}
+                </span>
+                <span className="block text-[10px] text-[#A9BBA7] truncate">
+                  {currentUser?.email || "candidate@autoagenthire.com"}
+                </span>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="p-1.5 rounded text-[#A9BBA7] hover:text-red-400 hover:bg-white/5 transition-colors"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleLogout}
+              className="w-full flex justify-center p-2 rounded text-[#A9BBA7] hover:text-red-400 hover:bg-white/5 transition-colors"
+              title="Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </aside>
 
-      {/* Mobile sidebar */}
+      {/* Mobile Drawer */}
       <AnimatePresence>
         {mobileMenuOpen && (
           <>
@@ -377,61 +400,64 @@ export const DashboardLayout = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setMobileMenuOpen(false)}
-              className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40 lg:hidden"
+              className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 lg:hidden"
             />
             <motion.aside
               initial={{ x: -280 }}
               animate={{ x: 0 }}
               exit={{ x: -280 }}
-              className="fixed inset-y-0 left-0 w-64 bg-card z-50 lg:hidden border-r border-white/5 flex flex-col"
+              className="fixed inset-y-0 left-0 w-64 bg-[#123B32] text-[#F7F5EF] z-50 lg:hidden border-r border-[#123B32]/40 flex flex-col"
             >
-              <div className="h-16 flex items-center justify-between px-4 border-b border-white/5">
+              <div className="h-20 flex items-center justify-between px-5 border-b border-white/10">
                 <Link to="/dashboard" className="flex items-center gap-3" onClick={() => setMobileMenuOpen(false)}>
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center shadow-md">
-                    <Bot className="w-6 h-6 text-primary-foreground" />
+                  <div className="w-10 h-10 rounded-lg bg-[#FF7058] text-white flex items-center justify-center">
+                    <Sparkles className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="text-base font-bold">AutoAgentHire</span>
-                    <span className="text-[10px] text-primary block">Candidate Portal</span>
+                    <span className="font-serif text-lg font-bold text-white block">AutoAgentHire</span>
+                    <span className="text-[10px] text-[#A9BBA7] block uppercase font-semibold">Candidate Portal</span>
                   </div>
                 </Link>
-                <button onClick={() => setMobileMenuOpen(false)} className="p-2 rounded-lg hover:bg-white/5 text-muted-foreground">
+                <button onClick={() => setMobileMenuOpen(false)} className="p-2 text-[#A9BBA7] hover:text-white">
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
               <nav className="p-4 space-y-1.5 flex-1 overflow-y-auto">
                 {sidebarLinks.map((link) => {
                   const isActive =
                     location.pathname === link.href ||
-                    (link.href === "/candidate/jobs" && (location.pathname === "/candidate/jobs" || location.pathname === "/dashboard/jobs"));
+                    (link.href === "/candidate/jobs" &&
+                      (location.pathname === "/candidate/jobs" || location.pathname === "/dashboard/jobs"));
 
                   return (
                     <Link
                       key={link.name}
                       to={link.href}
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
+                      className={`flex items-center gap-3 px-3.5 py-3 rounded-lg text-xs font-semibold ${
                         isActive
-                          ? "bg-primary text-primary-foreground font-semibold"
-                          : "text-muted-foreground hover:bg-white/5"
+                          ? "bg-white/10 text-white border-l-2 border-[#FF7058]"
+                          : "text-[#A9BBA7] hover:bg-white/5 hover:text-white"
                       }`}
                     >
-                      <link.icon className="w-5 h-5" />
-                      <span className="font-medium text-sm">{link.name}</span>
+                      <link.icon className={`w-4 h-4 ${isActive ? "text-[#FF7058]" : ""}`} />
+                      <span>{link.name}</span>
                     </Link>
                   );
                 })}
               </nav>
-              <div className="p-4 border-t border-white/5 mt-auto">
+
+              <div className="p-4 border-t border-white/10 mt-auto">
                 <button
                   onClick={() => {
                     setMobileMenuOpen(false);
                     handleLogout();
                   }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all"
+                  className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-[#A9BBA7] hover:text-red-400 hover:bg-white/5 transition-colors"
                 >
-                  <LogOut className="w-5 h-5 flex-shrink-0" />
-                  <span className="font-medium text-sm">Logout</span>
+                  <LogOut className="w-4 h-4" />
+                  <span>Sign Out</span>
                 </button>
               </div>
             </motion.aside>
@@ -439,48 +465,53 @@ export const DashboardLayout = () => {
         )}
       </AnimatePresence>
 
-      {/* Main content wrapper */}
-      <div className={`flex-1 flex flex-col ${sidebarOpen ? "lg:ml-64" : "lg:ml-20"} transition-all duration-300 min-w-0`}>
-        {/* Top header */}
-        <header className="h-16 bg-card/60 backdrop-blur-xl border-b border-white/5 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-30">
+      {/* Main Content Area */}
+      <div
+        className={`flex-1 flex flex-col ${
+          sidebarOpen ? "lg:ml-64" : "lg:ml-20"
+        } transition-all duration-300 min-w-0 bg-[#F7F5EF]`}
+      >
+        {/* Top Header Bar */}
+        <header className="h-20 bg-[#F7F5EF]/95 backdrop-blur-md border-b border-[#E6E5DC] flex items-center justify-between px-6 lg:px-8 sticky top-0 z-30">
           <div className="flex items-center gap-4">
             <button
               onClick={() => setMobileMenuOpen(true)}
-              className="lg:hidden p-2 rounded-lg hover:bg-white/5 text-muted-foreground"
+              className="lg:hidden p-2 rounded-lg text-[#123B32] hover:bg-stone-200/50"
             >
               <Menu className="w-5 h-5" />
             </button>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold tracking-tight text-foreground">
+            <div className="flex items-center gap-3">
+              <h1 className="font-serif text-2xl font-bold tracking-tight text-[#123B32]">
                 {getPageTitle()}
               </h1>
-              <Badge variant="outline" className="hidden sm:inline-flex text-[11px] border-primary/30 text-primary bg-primary/5">
-                Client Portal
+              <Badge
+                variant="outline"
+                className="hidden sm:inline-flex text-[10px] uppercase font-bold tracking-wider border-[#123B32]/30 text-[#123B32] bg-white px-2.5 py-0.5"
+              >
+                Candidate Suite
               </Badge>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* ═══════════════════════════════════════════════════════════════ */}
-            {/* ACTIVATED NOTIFICATION BUTTON & DROPDOWN                      */}
-            {/* ═══════════════════════════════════════════════════════════════ */}
+            {/* Notification Button */}
             <div className="relative" ref={notifRef}>
               <button
                 onClick={() => {
                   setNotificationsOpen(!notificationsOpen);
                   setProfileOpen(false);
                 }}
-                className={`relative p-2.5 rounded-xl transition-all border ${
+                className={`relative p-2.5 rounded-lg border transition-all ${
                   notificationsOpen
-                    ? "bg-primary/20 border-primary/40 text-primary"
-                    : "hover:bg-white/5 border-white/5 text-muted-foreground hover:text-foreground"
+                    ? "bg-white border-[#123B32] text-[#123B32]"
+                    : "bg-white hover:bg-stone-50 border-[#E6E5DC] text-[#777D74]"
                 }`}
                 title="Notifications"
                 aria-label="View notifications"
               >
-                <Bell className="w-5 h-5" />
+                <Bell className="w-4 h-4" />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-primary text-primary-foreground text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse shadow-sm">
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-[#FF7058] text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow-xs">
                     {unreadCount}
                   </span>
                 )}
@@ -489,28 +520,27 @@ export const DashboardLayout = () => {
               <AnimatePresence>
                 {notificationsOpen && (
                   <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.98 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-card border border-white/10 shadow-2xl z-50 overflow-hidden"
+                    className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl bg-white border border-[#E6E5DC] shadow-xl z-50 overflow-hidden"
                   >
-                    {/* Header */}
-                    <div className="p-3.5 border-b border-white/10 flex items-center justify-between bg-white/5">
+                    <div className="p-3.5 border-b border-[#E6E5DC] flex items-center justify-between bg-[#F7F5EF]">
                       <div className="flex items-center gap-2">
-                        <Bell className="w-4 h-4 text-primary" />
-                        <span className="font-semibold text-sm">Notifications</span>
+                        <Bell className="w-4 h-4 text-[#123B32]" />
+                        <span className="font-serif text-sm font-bold text-[#123B32]">Notifications</span>
                         {unreadCount > 0 && (
-                          <Badge variant="secondary" className="text-[10px] bg-primary/20 text-primary">
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#FF7058]/10 text-[#FF7058]">
                             {unreadCount} new
-                          </Badge>
+                          </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         {unreadCount > 0 && (
                           <button
                             onClick={markAllAsRead}
-                            className="text-[11px] text-primary hover:underline font-medium px-2 py-1 rounded hover:bg-primary/10 transition-colors"
+                            className="text-[11px] text-[#123B32] hover:underline font-semibold"
                           >
                             Mark all read
                           </button>
@@ -518,7 +548,7 @@ export const DashboardLayout = () => {
                         {notifications.length > 0 && (
                           <button
                             onClick={clearAllNotifications}
-                            className="text-[11px] text-muted-foreground hover:text-destructive px-1.5 py-1 rounded hover:bg-white/5 transition-colors"
+                            className="text-[11px] text-[#777D74] hover:text-red-600"
                             title="Clear all"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -527,8 +557,7 @@ export const DashboardLayout = () => {
                       </div>
                     </div>
 
-                    {/* Notification List */}
-                    <div className="max-h-80 overflow-y-auto divide-y divide-white/5">
+                    <div className="max-h-80 overflow-y-auto divide-y divide-[#E6E5DC]">
                       {notifications.length > 0 ? (
                         notifications.map((notif) => (
                           <div
@@ -540,200 +569,121 @@ export const DashboardLayout = () => {
                                 setNotificationsOpen(false);
                               }
                             }}
-                            className={`p-3.5 flex items-start gap-3 hover:bg-white/5 cursor-pointer transition-colors ${
-                              !notif.read ? "bg-primary/5" : ""
+                            className={`p-3.5 flex items-start gap-3 hover:bg-[#F7F5EF] cursor-pointer transition-colors ${
+                              !notif.read ? "bg-[#FF7058]/5" : ""
                             }`}
                           >
-                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                              notif.type === "job" ? "bg-blue-500/10 text-blue-400" :
-                              notif.type === "ats" ? "bg-purple-500/10 text-purple-400" :
-                              notif.type === "application" ? "bg-emerald-500/10 text-emerald-400" :
-                              "bg-amber-500/10 text-amber-400"
-                            }`}>
-                              {notif.type === "job" ? <Briefcase className="w-4 h-4" /> :
-                               notif.type === "ats" ? <Sparkles className="w-4 h-4" /> :
-                               notif.type === "application" ? <CheckCircle2 className="w-4 h-4" /> :
-                               <Bot className="w-4 h-4" />}
+                            <div className="w-8 h-8 rounded-lg bg-[#123B32]/10 text-[#123B32] flex items-center justify-center shrink-0 mt-0.5">
+                              {notif.type === "job" ? <Briefcase className="w-4 h-4 text-[#123B32]" /> :
+                               notif.type === "ats" ? <Sparkles className="w-4 h-4 text-[#FF7058]" /> :
+                               notif.type === "application" ? <CheckCircle2 className="w-4 h-4 text-emerald-700" /> :
+                               <Bot className="w-4 h-4 text-[#123B32]" />}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">
-                                <p className={`text-xs font-semibold truncate ${!notif.read ? "text-foreground" : "text-muted-foreground"}`}>
+                                <p className={`text-xs font-bold truncate ${!notif.read ? "text-[#123B32]" : "text-[#777D74]"}`}>
                                   {notif.title}
                                 </p>
-                                <span className="text-[10px] text-muted-foreground flex-shrink-0">{notif.time}</span>
+                                <span className="text-[10px] text-[#777D74] shrink-0">{notif.time}</span>
                               </div>
-                              <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+                              <p className="text-[11px] text-[#777D74] mt-0.5 leading-snug line-clamp-2">
                                 {notif.message}
                               </p>
                             </div>
                             {!notif.read && (
-                              <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0 self-center" />
+                              <span className="w-2 h-2 rounded-full bg-[#FF7058] shrink-0 self-center" />
                             )}
                           </div>
                         ))
                       ) : (
-                        <div className="py-8 text-center text-muted-foreground space-y-2">
-                          <Check className="w-8 h-8 mx-auto text-muted-foreground/50" />
-                          <p className="text-xs">All caught up! No notifications.</p>
+                        <div className="py-8 text-center text-[#777D74] space-y-2">
+                          <Check className="w-6 h-6 mx-auto text-[#A9BBA7]" />
+                          <p className="text-xs">All notifications cleared.</p>
                         </div>
                       )}
-                    </div>
-
-                    {/* Footer */}
-                    <div className="p-2 border-t border-white/10 bg-white/5 text-center">
-                      <Link
-                        to="/candidate/jobs"
-                        onClick={() => setNotificationsOpen(false)}
-                        className="text-xs text-primary hover:underline font-medium inline-flex items-center gap-1"
-                      >
-                        <span>Explore verified opportunities</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </Link>
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
 
-            {/* ═══════════════════════════════════════════════════════════════ */}
-            {/* ACTIVATED PROFILE BUTTON & DROPDOWN                            */}
-            {/* ═══════════════════════════════════════════════════════════════ */}
+            {/* Profile Dropdown */}
             <div className="relative" ref={profileRef}>
               <div
                 onClick={() => {
                   setProfileOpen(!profileOpen);
                   setNotificationsOpen(false);
                 }}
-                className={`flex items-center gap-2.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${
-                  profileOpen
-                    ? "bg-white/10 border-primary/40 text-foreground"
-                    : "hover:bg-white/5 border-white/5 text-muted-foreground hover:text-foreground"
+                className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer bg-white ${
+                  profileOpen ? "border-[#123B32]" : "border-[#E6E5DC] hover:border-[#123B32]/40"
                 }`}
-                title="Account Menu"
               >
-                {currentUser?.avatar_url ? (
-                  <img
-                    src={currentUser.avatar_url}
-                    alt={currentUser.full_name || "Profile"}
-                    className="w-8 h-8 rounded-lg object-cover border border-primary/30 shadow-md shadow-primary/25"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=128&h=128&fit=crop";
-                    }}
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center text-primary-foreground text-xs font-bold shadow-md shadow-primary/25">
-                    {getUserInitials()}
-                  </div>
-                )}
-                <div className="hidden sm:block text-left">
-                  <span className="text-xs font-semibold block text-foreground leading-tight">
-                    {currentUser?.full_name?.split(" ")[0] || currentUser?.email?.split("@")[0] || "Candidate"}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground block leading-tight">Active</span>
+                <div className="w-7 h-7 rounded bg-[#123B32] text-white flex items-center justify-center text-xs font-bold">
+                  {getUserInitials()}
                 </div>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${profileOpen ? "rotate-180 text-primary" : ""}`} />
+                <div className="hidden sm:block text-left">
+                  <span className="text-xs font-bold block text-[#123B32] leading-tight">
+                    {currentUser?.full_name?.split(" ")[0] || "Candidate"}
+                  </span>
+                  <span className="text-[10px] text-[#777D74] block leading-tight">Verified</span>
+                </div>
+                <ChevronDown className={`w-3.5 h-3.5 text-[#777D74] transition-transform ${profileOpen ? "rotate-180 text-[#123B32]" : ""}`} />
               </div>
 
               <AnimatePresence>
                 {profileOpen && (
                   <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.98 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 w-64 rounded-2xl bg-card border border-white/10 shadow-2xl z-50 overflow-hidden"
+                    className="absolute right-0 mt-2 w-64 rounded-xl bg-white border border-[#E6E5DC] shadow-xl z-50 overflow-hidden"
                   >
-                    {/* User Info Header */}
-                    <div className="p-4 border-b border-white/10 bg-white/5">
-                      <div className="flex items-center gap-3">
-                        {currentUser?.avatar_url ? (
-                          <img
-                            src={currentUser.avatar_url}
-                            alt={currentUser.full_name || "Profile"}
-                            className="w-10 h-10 rounded-xl object-cover border border-primary/30 shadow-md"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=128&h=128&fit=crop";
-                            }}
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center text-primary-foreground font-bold shadow-md">
-                            {getUserInitials()}
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold truncate text-foreground">
-                            {currentUser?.full_name || "Candidate User"}
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate">
-                            {currentUser?.email || "candidate@autoagenthire.com"}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-2.5 flex items-center gap-1.5">
-                        <Badge variant="outline" className="text-[10px] bg-primary/10 border-primary/30 text-primary">
-                          <ShieldCheck className="w-3 h-3 mr-1" />
-                          Candidate Verified
-                        </Badge>
-                      </div>
+                    <div className="p-4 border-b border-[#E6E5DC] bg-[#F7F5EF]">
+                      <p className="text-xs font-bold truncate text-[#123B32]">
+                        {currentUser?.full_name || "Candidate User"}
+                      </p>
+                      <p className="text-[11px] text-[#777D74] truncate">
+                        {currentUser?.email || "candidate@autoagenthire.com"}
+                      </p>
                     </div>
 
-                    {/* Nav Actions */}
-                    <div className="p-2 space-y-1">
+                    <div className="p-2 space-y-1 text-xs">
                       <Link
                         to="/dashboard/profile"
                         onClick={() => setProfileOpen(false)}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-primary hover:bg-primary/10 transition-colors"
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-[#123B32] hover:bg-[#F7F5EF] font-semibold"
                       >
-                        <User className="w-4 h-4 text-primary" />
-                        <span>My Profile (Edit Details)</span>
+                        <User className="w-3.5 h-3.5 text-[#123B32]" />
+                        <span>Profile Credentials</span>
                       </Link>
                       <Link
                         to="/dashboard/resume"
                         onClick={() => setProfileOpen(false)}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-[#777D74] hover:text-[#123B32] hover:bg-[#F7F5EF]"
                       >
-                        <FileText className="w-4 h-4 text-primary" />
-                        <span>My Resume & Profile</span>
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>ATS Score & Resume</span>
                       </Link>
-
-                      <Link
-                        to="/candidate/jobs"
-                        onClick={() => setProfileOpen(false)}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
-                      >
-                        <Briefcase className="w-4 h-4 text-blue-400" />
-                        <span>Browse Verified Jobs</span>
-                      </Link>
-
                       <Link
                         to="/dashboard/applications"
                         onClick={() => setProfileOpen(false)}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-[#777D74] hover:text-[#123B32] hover:bg-[#F7F5EF]"
                       >
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        <span>Application Tracking</span>
-                      </Link>
-
-                      <Link
-                        to="/dashboard/settings"
-                        onClick={() => setProfileOpen(false)}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
-                      >
-                        <Settings className="w-4 h-4 text-muted-foreground" />
-                        <span>Account & Security Settings</span>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Tracked Applications</span>
                       </Link>
                     </div>
 
-                    {/* Sign Out */}
-                    <div className="p-2 border-t border-white/10 bg-white/5">
+                    <div className="p-2 border-t border-[#E6E5DC] bg-[#F7F5EF]">
                       <button
                         onClick={() => {
                           setProfileOpen(false);
                           handleLogout();
                         }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors text-left"
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-red-700 hover:bg-red-50 text-left"
                       >
-                        <LogOut className="w-4 h-4" />
+                        <LogOut className="w-3.5 h-3.5" />
                         <span>Sign Out</span>
                       </button>
                     </div>
@@ -744,8 +694,8 @@ export const DashboardLayout = () => {
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 p-4 lg:p-8 min-w-0">
+        {/* Dynamic Nested Page Content */}
+        <main className="flex-1 p-6 lg:p-8 min-w-0">
           <Outlet />
         </main>
       </div>

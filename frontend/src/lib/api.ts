@@ -2,24 +2,63 @@ import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 
 /**
  * Production-safe API Base URL resolution:
- * - Reads VITE_API_BASE_URL or VITE_API_URL if configured.
- * - In production builds, prevents hardcoded localhost:8000 from being called from client browsers.
- * - Defaults to empty string '' so API and Auth requests route cleanly through Vite's proxy (in dev)
- *   or same-origin reverse proxy (in production) without connection refused errors.
+ * - Reads VITE_API_URL or VITE_API_BASE_URL if configured.
+ * - Runtime check: If running in a browser on a remote host (e.g. *.vercel.app, *.onrender.com),
+ *   strictly disallows localhost/127.0.0.1 to prevent ERR_CONNECTION_REFUSED.
+ * - In production mode (import.meta.env.PROD), similarly blocks localhost URLs.
+ * - In both cases, falls back to relative routing '' so Vercel rewrites in vercel.json
+ *   (or Vite dev proxy in local dev) handle the request seamlessly.
+ * - In local dev with a running backend, VITE_API_URL is set to http://127.0.0.1:8000.
  */
-const getApiBaseUrl = (): string => {
-  const envUrl = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').trim();
-  if (envUrl) {
-    if (import.meta.env.PROD && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
-      console.warn('[API] Localhost URL detected in production environment. Falling back to relative routing.');
+export const getApiBaseUrl = (): string => {
+  const envUrl = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '').trim();
+
+  // If in browser environment, check current host
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    const isLocalhostHost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+    // If running on a remote host (e.g. Vercel, Render), NEVER call localhost
+    if (!isLocalhostHost && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
+      console.warn(`[API] Blocked localhost API URL on remote host (${hostname}). Falling back to relative routing.`);
       return '';
     }
-    return envUrl.replace(/\/+$/, '');
   }
+
+  // If in production build mode, NEVER bake in localhost
+  if (import.meta.env.PROD && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
+    console.warn('[API] Localhost URL detected in production environment. Falling back to relative routing.');
+    return '';
+  }
+
+  if (envUrl) {
+    const cleanUrl = envUrl.replace(/\/+$/, '');
+    // Prevent duplicate /api segments if user specified base ending with /api
+    return cleanUrl.endsWith('/api') ? cleanUrl.slice(0, -4) : cleanUrl;
+  }
+
+  // Relative routing by default
   return '';
 };
 
 export const API_BASE_URL = getApiBaseUrl();
+
+/**
+ * Resolves a full, normalized API URL given an endpoint path.
+ * Normalizes slashes and prevents duplicate `/api` path segments.
+ *
+ * Examples:
+ *   resolveApiUrl('/auth/google') => 'http://127.0.0.1:8000/auth/google'
+ *   resolveApiUrl('/api/jobs')    => 'http://127.0.0.1:8000/api/jobs'
+ */
+export function resolveApiUrl(endpoint: string): string {
+  const base = getApiBaseUrl();
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  if (!base) {
+    return cleanEndpoint;
+  }
+  return `${base}${cleanEndpoint}`;
+}
 
 /**
  * Generate authenticated URL for viewing/downloading resumes or documents.
@@ -118,10 +157,13 @@ apiClient._axios.interceptors.request.use(
     const rawToken = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token');
     const token = rawToken?.trim();
     if (token && token !== 'undefined' && token !== 'null') {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
+      if (!config.headers) {
+        (config as any).headers = {};
+      }
       if (typeof (config.headers as any).set === 'function') {
         (config.headers as any).set('Authorization', `Bearer ${token}`);
+      } else {
+        (config.headers as any).Authorization = `Bearer ${token}`;
       }
     }
     return config;
@@ -166,6 +208,17 @@ apiClient._axios.interceptors.response.use(
         }, 1500);
       }
     }
+
+    // Enhance connection refused / offline network error messages
+    if (!error.response) {
+      const isLocal = API_BASE_URL.includes('localhost') || API_BASE_URL.includes('127.0.0.1');
+      if (isLocal) {
+        error.message = `Unable to connect to local backend at ${API_BASE_URL}. Ensure the FastAPI server is running with: "python -m uvicorn backend.main:app --reload --port 8000".`;
+      } else if (!API_BASE_URL && typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        error.message = 'Unable to connect to local backend on port 8000. Start it with: "python -m uvicorn backend.main:app --reload --port 8000".';
+      }
+    }
+
     return Promise.reject(error);
   },
 );
@@ -185,10 +238,21 @@ export const API_ENDPOINTS = {
     changePassword: '/auth/change-password',
   },
 
+  // Candidate Custom Recommendations & Preferences
+  candidate: {
+    recommendations: '/api/candidate/recommendations',
+    preferences: '/api/candidate/preferences',
+    skillsSuggestions: '/api/candidate/skills-suggestions',
+  },
+
   // Jobs
   jobs: {
+    list: '/api/jobs',
     search: '/api/jobs/search',
-    details: (id: string) => `/api/jobs/${id}`,
+    saved: '/api/jobs/saved',
+    sync: '/api/jobs/sync',
+    details: (id: string | number, jobType: string = 'imported') => `/api/jobs/${id}?job_type=${jobType}`,
+    toggleSave: (id: string | number) => `/api/jobs/${id}/save`,
     apply: '/api/v2/start-automation',
     automation: '/api/v2/start-automation',
     automationStatus: (sessionId: string) => `/api/v2/automation-status/${sessionId}`,
@@ -225,6 +289,10 @@ export const API_ENDPOINTS = {
     score: '/api/ats/match',
     optimize: '/api/ats/match',
     parseResume: '/api/ats/parse-resume',
+    currentProfile: '/api/ats/current-profile',
+    optimizeResume: '/api/ats/optimize-resume',
+    calibrateTarget: '/api/ats/calibrate-target',
+    applyAll: '/api/ats/apply-all',
   },
 
   // Recruiter & Authorizer & Candidate Job Board
@@ -295,6 +363,43 @@ export const API_ENDPOINTS = {
     jobs: '/api/mongo/jobs',
     applications: '/api/mongo/applications',
     users: '/api/mongo/users',
+  },
+
+  // Integrations & Job Portals
+  integrations: {
+    providers: '/api/integrations/providers',
+    list: '/api/integrations',
+    create: '/api/integrations',
+    validate: (id: number) => `/api/integrations/${id}/validate`,
+    delete: (id: number) => `/api/integrations/${id}`,
+    sync: (id: number) => `/api/integrations/${id}/sync`,
+    history: (id: number) => `/api/integrations/${id}/history`,
+    applications: '/api/integrations/applications',
+    websiteScan: '/api/integrations/website/scan',
+    websiteImport: '/api/integrations/website/import',
+    websiteHistory: '/api/integrations/website/history',
+    websiteStatus: (id: number) => `/api/integrations/website/${id}/status`,
+  },
+
+  // Admin & Database Health
+  admin: {
+    databaseHealth: '/api/admin/database-health',
+    integrationsHealth: '/api/admin/integrations/health',
+  },
+
+  // Practice (AI Interview & Technical Assessment)
+  practice: {
+    profile: '/api/practice/profile',
+    startInterview: '/api/practice/interview/start',
+    submitInterviewAnswer: (sessionId: number | string) => `/api/practice/interview/${sessionId}/answer`,
+    finishInterview: (sessionId: number | string) => `/api/practice/interview/${sessionId}/finish`,
+    startTest: '/api/practice/test/start',
+    saveTestAnswer: (sessionId: number | string) => `/api/practice/test/${sessionId}/answer`,
+    submitTest: (sessionId: number | string) => `/api/practice/test/${sessionId}/submit`,
+    sessions: '/api/practice/sessions',
+    sessionDetail: (sessionId: number | string) => `/api/practice/sessions/${sessionId}`,
+    deleteSession: (sessionId: number | string) => `/api/practice/sessions/${sessionId}`,
+    analytics: '/api/practice/analytics',
   },
 
   // Health check

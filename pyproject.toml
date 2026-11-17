@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autoagenthire"
+version = "1.0.0"
+description = "Autonomous AI agent system for automated job discovery, personalized applications, and recruiter portal."
+readme = "README.md"
+requires-python = ">=3.11, <3.14"
+license = { text = "MIT" }
+authors = [
+    { name = "AutoAgentHire Team" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Framework :: FastAPI",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.32.0",
+    "gunicorn==21.2.0",
+    "pydantic==2.9.2",
+    "pydantic[email]==2.9.2",
+    "pydantic-settings==2.6.1",
+    "email-validator>=2.1.0",
+    "python-dotenv==1.0.1",
+    "python-multipart==0.0.9",
+    "sqlalchemy==2.0.36",
+    "pymongo>=4.0.0",
+    "dnspython>=2.0.0",
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    "bcrypt==4.0.1",
+    "google-auth==2.29.0",
+    "google-auth-httplib2==0.4.4",
+    "google-api-python-client>=2.100.0",
+    "httpx==0.28.1",
+    "aiohttp==3.11.11",
+    "requests==2.32.3",
+    "langgraph==0.2.59",
+    "langchain-core>=0.3.0",
+    "google-generativeai==0.8.3",
+    "openai==1.57.4",
+    "groq>=0.4.0",
+    "pypdf==5.1.0",
+    "pdfminer.six>=20231228",
+    "python-docx==1.1.2",
+    "beautifulsoup4==4.12.3",
+    "lxml==5.3.0",
+    "playwright==1.48.0",
+    "greenlet>=3.0.0",
+    "loguru==0.7.2",
+]
+
+[project.optional-dependencies]
+vectorstore = [
+    "numpy>=1.26.4",
+    "qdrant-client>=1.7.0",
+]
+embeddings = [
+    "sentence-transformers>=2.2.0",
+]
+s3 = [
+    "boto3>=1.34.0",
+    "botocore>=1.34.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.28.0",
+]
+

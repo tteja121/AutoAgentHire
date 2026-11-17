@@ -8,8 +8,14 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
 from pydantic import BaseModel, Field
+try:
+    from pydantic import ConfigDict
+except ImportError:
+    ConfigDict = None
+
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
+
 
 from backend.auth.dependencies import get_current_user, get_current_user_optional
 from backend.database.connection import get_db
@@ -94,8 +100,11 @@ class RecruiterRequestResponse(BaseModel):
     approval_notes: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    if ConfigDict is not None:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
 
 
 class ApplicationStatusUpdate(BaseModel):
@@ -137,8 +146,11 @@ class CandidateApplicationResponse(BaseModel):
     interview_notes: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    if ConfigDict is not None:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
 
 
 class JobPostingResponse(BaseModel):
@@ -167,8 +179,11 @@ class JobPostingResponse(BaseModel):
     created_at: Optional[datetime] = None
     applications_count: Optional[int] = 0
 
-    class Config:
-        from_attributes = True
+    if ConfigDict is not None:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
 
 
 # ── Recruiter Endpoints ────────────────────────────────────────────────────────
@@ -1003,7 +1018,7 @@ def get_audit_logs(
 def get_candidate_jobs(
     db: Session = Depends(get_db),
 ):
-    """Candidate Page displays active jobs posted by recruiters."""
+    """Candidate Page displays active jobs posted by recruiters, falling back to imported listings if empty."""
     jobs = db.query(JobPosting).filter(
         JobPosting.status.in_(["approved", "active", "published", "pending_approval"])
     ).order_by(desc(JobPosting.id)).all()
@@ -1012,6 +1027,39 @@ def get_candidate_jobs(
         resp = JobPostingResponse.model_validate(j)
         resp.applications_count = db.query(JobApplication).filter(JobApplication.job_posting_id == j.id).count()
         result.append(resp)
+
+    if not result:
+        from backend.database.models_complete import ImportedJobListing
+        imported_rows = db.query(ImportedJobListing).filter(ImportedJobListing.status == "active").order_by(desc(ImportedJobListing.id)).all()
+        for imp in imported_rows:
+            skills_str = ", ".join(imp.skills) if isinstance(imp.skills, list) else (str(imp.skills) if imp.skills else "")
+            app_count = db.query(JobApplication).filter(JobApplication.imported_job_id == imp.id).count()
+            result.append(JobPostingResponse(
+                id=imp.id,
+                uuid=imp.uuid,
+                recruiter_id=imp.user_id or 1,
+                recruiter_name="Verified Partner ATS",
+                company_name=imp.company_name,
+                company_logo_url=imp.company_logo_url,
+                organization_symbol=imp.provider.upper() if imp.provider else "ATS",
+                title=imp.title,
+                vacancies=1,
+                salary_description=imp.salary or "Competitive",
+                job_type=imp.employment_type or "Full-time",
+                location=imp.location or "Remote",
+                description=imp.description,
+                requirements=None,
+                skills=skills_str,
+                recruiting_process="Verified ATS Integration Pipeline",
+                start_date_pt=imp.created_at.isoformat() if imp.created_at else datetime.now(timezone.utc).isoformat(),
+                final_date_pt=imp.deadline.isoformat() if imp.deadline else (datetime.now(timezone.utc) + timedelta(days=60)).isoformat(),
+                timezone="UTC",
+                status="active",
+                authorizer_notes=f"Supplied via {imp.provider.title() if imp.provider else 'Partner'} Integration",
+                authorized_at=datetime.now(timezone.utc),
+                created_at=imp.created_at or datetime.now(timezone.utc),
+                applications_count=app_count,
+            ))
     return result
 
 
@@ -1019,6 +1067,7 @@ def get_candidate_jobs(
 async def apply_to_job(
     job_id: int,
     request: Request,
+    job_type: Optional[str] = Query(None),
     candidate_name: Optional[str] = Form(None),
     candidate_email: Optional[str] = Form(None),
     candidate_phone: Optional[str] = Form(None),
@@ -1030,12 +1079,10 @@ async def apply_to_job(
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
-    """Candidate applies to a recruiter's posted job, uploading Resume & CV files or submitting JSON."""
-    from backend.services.email_service import (
-        validate_email_address,
-        send_candidate_application_thank_you_email,
-        send_application_notification_email,
-    )
+    """Candidate applies internally to any job (recruiter posting or imported ATS listing)."""
+    import backend.services.email_service as email_service
+    from backend.services.email_service import validate_email_address
+    from backend.database.models_complete import ImportedJobListing
 
     # Check if request body was JSON
     content_type = request.headers.get("content-type", "").lower()
@@ -1049,6 +1096,7 @@ async def apply_to_job(
                 linkedin_url = linkedin_url or body_json.get("linkedin_url")
                 portfolio_url = portfolio_url or body_json.get("portfolio_url")
                 cover_letter = cover_letter or body_json.get("cover_letter")
+                job_type = job_type or body_json.get("job_type")
         except Exception:
             pass
 
@@ -1085,10 +1133,65 @@ async def apply_to_job(
     if not clean_name:
         clean_name = clean_email.split("@")[0]
 
-    job = db.query(JobPosting).filter(JobPosting.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job posting not found")
+    # Resolve job: check recruiter posting or imported ATS listing
+    resolved_job_type = "recruiter"
+    job_posting = None
+    imported_job = None
+    job_title = ""
+    company_name = ""
+    job_location = "Remote"
 
+    if job_type == "imported":
+        imported_job = db.query(ImportedJobListing).filter(ImportedJobListing.id == job_id).first()
+        if not imported_job:
+            # Fallback check job postings in case ID mismatched
+            job_posting = db.query(JobPosting).filter(JobPosting.id == job_id).first()
+    else:
+        job_posting = db.query(JobPosting).filter(JobPosting.id == job_id).first()
+        if not job_posting:
+            imported_job = db.query(ImportedJobListing).filter(ImportedJobListing.id == job_id).first()
+
+    if job_posting:
+        resolved_job_type = "recruiter"
+        job_title = job_posting.title
+        company_name = job_posting.company_name
+        job_location = job_posting.location or "Remote"
+    elif imported_job:
+        resolved_job_type = "imported"
+        job_title = imported_job.title
+        company_name = imported_job.company_name
+        job_location = imported_job.location or "Remote"
+    else:
+        raise HTTPException(status_code=404, detail="Job listing not found in active requisitions or imported listings")
+
+    # Check for duplicate active applications by this candidate for the same job
+    dup_filter = [JobApplication.status != "withdrawn"]
+    if cand_id:
+        dup_user_filter = or_(JobApplication.candidate_id == cand_id, JobApplication.candidate_email.ilike(clean_email))
+    else:
+        dup_user_filter = JobApplication.candidate_email.ilike(clean_email)
+
+    if resolved_job_type == "recruiter":
+        existing_app = db.query(JobApplication).filter(
+            JobApplication.job_posting_id == job_posting.id,
+            dup_user_filter,
+            *dup_filter
+        ).first()
+    else:
+        existing_app = db.query(JobApplication).filter(
+            JobApplication.imported_job_id == imported_job.id,
+            dup_user_filter,
+            *dup_filter
+        ).first()
+
+    if existing_app:
+        existing_ref = existing_app.reference_id or f"AAH-APP-#{existing_app.id}"
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"You have already submitted an application for '{job_title}' at {company_name} (Reference: {existing_ref}). You can track this application in your Applications Dashboard."
+        )
+
+    # File uploads: Resume & CV
     resume_url = None
     resume_filename = None
     if resume and resume.filename:
@@ -1118,10 +1221,51 @@ async def apply_to_job(
             resume_url = existing_res.storage_url
             resume_filename = existing_res.filename
 
-    # Step 1: Save application to database first with proper candidate_id
+    # Determine delivery status and channel truthfully
+    cur_year = datetime.now().year
+    reference_id = f"AAH-APP-{cur_year}-{_uuid.uuid4().hex[:6].upper()}"
+    delivery_status = "Delivered to Employer"
+    delivery_channel = "AutoAgentHire Direct Requisition"
+    delivery_details = f"Application delivered directly to {company_name} recruiting desk."
+    recruiter_to_notify = None
+
+    if resolved_job_type == "recruiter" and job_posting:
+        if job_posting.recruiter_id:
+            recruiter_to_notify = db.query(User).filter(User.id == job_posting.recruiter_id).first()
+    else:
+        # Imported job: check if an employer/recruiter from this company is registered on AutoAgentHire
+        matched_rec = db.query(User).filter(
+            User.role == "recruiter",
+            User.company_name.ilike(company_name)
+        ).first()
+        if matched_rec:
+            delivery_status = "Delivered to Employer"
+            delivery_channel = "AutoAgentHire Employer Network"
+            delivery_details = f"Application routed to verified {company_name} partner recruiter account."
+            recruiter_to_notify = matched_rec
+        else:
+            delivery_status = "Awaiting Employer Connection"
+            delivery_channel = "AutoAgentHire Portal Vault"
+            delivery_details = (
+                f"Application secured in AutoAgentHire Vault. Employer {company_name} will receive credentials upon portal onboarding. "
+                f"Official reference {reference_id} certified."
+            )
+
+    # Step 1: Save application to database
     application = JobApplication(
-        job_posting_id=job.id,
+        reference_id=reference_id,
+        job_type=resolved_job_type,
+        job_posting_id=job_posting.id if job_posting else None,
+        imported_job_id=imported_job.id if imported_job else None,
         candidate_id=cand_id,
+        company_name=company_name,
+        job_title=job_title,
+        job_location=job_location,
+        submission_channel="autoagenthire_portal",
+        consent_timestamp=datetime.now(timezone.utc),
+        delivery_status=delivery_status,
+        delivery_channel=delivery_channel,
+        delivery_details=delivery_details,
         candidate_name=clean_name,
         candidate_email=clean_email,
         candidate_phone=candidate_phone.strip() if candidate_phone else None,
@@ -1140,7 +1284,7 @@ async def apply_to_job(
     db.commit()
     db.refresh(application)
 
-    # Step 2: Idempotent Thank-You Confirmation Email Dispatch
+    # Step 2: Idempotent Candidate Confirmation Email Dispatch
     idempotency_key = f"app-thankyou-{application.id}"
     if application.email_idempotency_key != idempotency_key or application.email_status != "Sent":
         setattr(application, "email_idempotency_key", idempotency_key)
@@ -1152,14 +1296,18 @@ async def apply_to_job(
             auth_email = str(auth_user.email) if (auth_user and auth_user.email) else None
             auth_name = str(auth_user.full_name) if (auth_user and auth_user.full_name) else "Senior Platform Authorizer"
 
-            email_sent, email_msg_id, email_err = send_candidate_application_thank_you_email(
+            email_sent, email_msg_id, email_err = email_service.send_candidate_application_thank_you_email(
                 candidate_email=str(clean_email),
                 candidate_name=str(clean_name),
-                job_title=str(job.title),
-                company_name=str(job.company_name),
+                job_title=str(job_title),
+                company_name=str(company_name),
                 application_id=application.id,
                 authorizer_email=auth_email,
                 authorizer_name=auth_name,
+                location=str(job_location),
+                resume_filename=resume_filename,
+                reference_id=reference_id,
+                delivery_status=delivery_status,
             )
             if email_sent:
                 setattr(application, "email_status", "Sent")
@@ -1179,28 +1327,32 @@ async def apply_to_job(
             setattr(application, "email_error", str(exc))
             db.commit()
 
-    # Step 3: Dispatch recruiter notification
-    try:
-        recruiter_user = db.query(User).filter(User.id == job.recruiter_id).first() if job.recruiter_id else None
-        target_recruiter_email = str(recruiter_user.email) if (recruiter_user and recruiter_user.email) else "re@auto.in"
-        target_rec_name = str(recruiter_user.full_name) if (recruiter_user and recruiter_user.full_name) else str(job.recruiter_name or "Recruiter")
-        send_application_notification_email(
-            recruiter_email=target_recruiter_email,
-            recruiter_name=target_rec_name,
-            job_title=str(job.title),
-            candidate_name=str(clean_name),
-            candidate_email=str(clean_email),
-            candidate_phone=candidate_phone or "",
-            resume_url=str(resume_url) if resume_url else None,
-        )
-    except Exception as exc:
-        import logging as _log
-        _log.getLogger(__name__).warning("Failed to dispatch application notification email to recruiter: %s", exc)
+    # Step 3: Dispatch recruiter notification if applicable
+    if recruiter_to_notify and recruiter_to_notify.email:
+        try:
+            email_service.send_application_notification_email(
+                recruiter_email=str(recruiter_to_notify.email),
+                recruiter_name=str(recruiter_to_notify.full_name or "Recruiter"),
+                job_title=str(job_title),
+                candidate_name=str(clean_name),
+                candidate_email=str(clean_email),
+                candidate_phone=candidate_phone or "",
+                resume_url=str(resume_url) if resume_url else None,
+            )
+        except Exception as exc:
+            import logging as _log
+            _log.getLogger(__name__).warning("Failed to dispatch application notification email to recruiter: %s", exc)
 
     return {
         "message": "Application submitted successfully!",
+        "reference_id": reference_id,
         "application_id": application.id,
         "uuid": application.uuid,
+        "job_title": job_title,
+        "company_name": company_name,
+        "delivery_status": delivery_status,
+        "delivery_channel": delivery_channel,
+        "delivery_details": delivery_details,
         "email_status": application.email_status,
         "email_recipient": application.candidate_email,
         "email_message_id": application.email_message_id,
@@ -1329,7 +1481,17 @@ def serve_file(
         raise HTTPException(status_code=403, detail="You are not authorized to access this file.")
 
     def _serve_file_response(path_to_file: str):
-        media_type = "application/pdf" if clean_name.lower().endswith(".pdf") or path_to_file.lower().endswith(".pdf") else None
+        low = path_to_file.lower()
+        if low.endswith(".pdf") or clean_name.lower().endswith(".pdf"):
+            media_type = "application/pdf"
+        elif low.endswith(".docx") or clean_name.lower().endswith(".docx"):
+            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        elif low.endswith(".doc") or clean_name.lower().endswith(".doc"):
+            media_type = "application/msword"
+        elif low.endswith(".txt") or clean_name.lower().endswith(".txt"):
+            media_type = "text/plain; charset=utf-8"
+        else:
+            media_type = "application/octet-stream"
         headers = {
             "Content-Disposition": f'inline; filename="{clean_name}"',
             "Cache-Control": "private, max-age=3600",

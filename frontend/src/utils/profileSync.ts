@@ -31,13 +31,15 @@ export interface AppliedJobRecord {
   location?: string;
   resume_filename?: string;
   resume_url?: string;
+  reference_id?: string;
+  delivery_status?: string;
 }
 
 /**
- * Extract, format, and apply candidate profile details from any parsed resume response.
- * Updates localStorage, broadcasts window event, and syncs to backend database.
+ * Extract candidate profile details from any parsed resume response WITHOUT mutating profile state.
+ * Returns in-memory profile representation for preview, matching, or review.
  */
-export function applyProfileFromResume(data: any, fileName?: string): CandidateProfile {
+export function extractResumeProfileData(data: any, fileName?: string): CandidateProfile {
   if (!data) {
     return getCandidateProfile();
   }
@@ -62,7 +64,7 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
     extractedSkills = parsed.skills;
   }
   // Deduplicate and trim skills
-  extractedSkills = Array.from(new Set(extractedSkills.map((s: string) => s.trim()))).filter(Boolean);
+  extractedSkills = Array.from(new Set(extractedSkills.map((s: any) => String(s).trim()))).filter(Boolean);
 
   // 2. Resolve Name
   const name = (
@@ -71,19 +73,11 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
     parsed.candidate_name ||
     parsed.name ||
     data.name ||
-    localStorage.getItem('candidate_name') ||
     ''
   ).trim();
 
-  // 3. Resolve Email - PRESERVE authenticated user's official email address!
-  const authenticatedEmail = (
-    localStorage.getItem('candidate_email') ||
-    localStorage.getItem('user_email') ||
-    ''
-  ).trim().toLowerCase();
-
+  // 3. Resolve Email
   const email = (
-    authenticatedEmail ||
     data.email ||
     contact.email ||
     parsed.email ||
@@ -95,7 +89,6 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
     data.phone ||
     contact.phone ||
     parsed.phone ||
-    localStorage.getItem('candidate_phone') ||
     ''
   ).trim();
 
@@ -105,8 +98,7 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
     contact.location ||
     contact.city ||
     parsed.location ||
-    localStorage.getItem('candidate_location') ||
-    'Remote'
+    ''
   ).trim();
 
   // 6. Resolve Experience
@@ -115,9 +107,6 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
     const firstRole = expList[0];
     const roleTitle = typeof firstRole === 'object' ? firstRole.title || '' : '';
     experienceStr = roleTitle ? `${roleTitle} (${expList.length} role${expList.length > 1 ? 's' : ''})` : `${expList.length} roles`;
-  }
-  if (!experienceStr) {
-    experienceStr = localStorage.getItem('candidate_experience') || 'Experience verified';
   }
 
   // 7. Resolve Headline / Job Title
@@ -128,9 +117,6 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
   if (!headline && extractedSkills.length > 0) {
     headline = `${extractedSkills.slice(0, 2).join(' / ')} Specialist`;
   }
-  if (!headline) {
-    headline = 'Software Engineer';
-  }
 
   // 8. Resolve Summary
   const summary = (
@@ -138,14 +124,13 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
     parsed.summary ||
     parsed.professional_summary ||
     data.summary ||
-    localStorage.getItem('candidate_summary') ||
     ''
   ).trim();
 
   const skillsString = extractedSkills.join(', ');
 
-  const profile: CandidateProfile = {
-    candidate_name: name || 'Candidate',
+  return {
+    candidate_name: name,
     email: email,
     phone: phone,
     location: location,
@@ -156,59 +141,84 @@ export function applyProfileFromResume(data: any, fileName?: string): CandidateP
     education: eduList,
     summary: summary,
     headline: headline,
-    resume_name: fileName || data.filename || localStorage.getItem('candidate_resume_name') || 'resume.pdf',
+    resume_name: fileName || data.filename || 'resume.pdf',
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Explicitly update chosen candidate profile fields when the user confirms.
+ * Guarantees that only explicitly selected fields are updated, preserving all others.
+ */
+export async function applyExplicitProfileUpdate(updates: Partial<CandidateProfile>): Promise<CandidateProfile> {
+  const current = getCandidateProfile();
+  const merged: CandidateProfile = {
+    ...current,
+    ...updates,
     updated_at: new Date().toISOString(),
   };
 
-  // Persist directly to localStorage keys
   try {
-    if (name) localStorage.setItem('candidate_name', name);
-    if (authenticatedEmail) {
-      localStorage.setItem('candidate_email', authenticatedEmail);
-      localStorage.setItem('user_email', authenticatedEmail);
-    } else if (email) {
-      localStorage.setItem('candidate_email', email);
+    if (updates.candidate_name !== undefined) localStorage.setItem('candidate_name', updates.candidate_name);
+    if (updates.phone !== undefined) localStorage.setItem('candidate_phone', updates.phone);
+    if (updates.location !== undefined) localStorage.setItem('candidate_location', updates.location);
+    if (updates.skills !== undefined && Array.isArray(updates.skills)) {
+      localStorage.setItem('candidate_skills', JSON.stringify(updates.skills));
+      localStorage.setItem('candidate_skills_str', updates.skills.join(', '));
+      merged.skills_string = updates.skills.join(', ');
     }
-    if (phone) localStorage.setItem('candidate_phone', phone);
-    if (location) localStorage.setItem('candidate_location', location);
-    if (extractedSkills.length > 0) {
-      localStorage.setItem('candidate_skills', JSON.stringify(extractedSkills));
-      localStorage.setItem('candidate_skills_str', skillsString);
-    }
-    if (experienceStr) localStorage.setItem('candidate_experience', experienceStr);
-    if (summary) localStorage.setItem('candidate_summary', summary);
-    if (headline) localStorage.setItem('candidate_headline', headline);
-    if (profile.resume_name) localStorage.setItem('candidate_resume_name', profile.resume_name);
-    localStorage.setItem('candidate_profile', JSON.stringify(profile));
+    if (updates.experience !== undefined) localStorage.setItem('candidate_experience', updates.experience);
+    if (updates.summary !== undefined) localStorage.setItem('candidate_summary', updates.summary);
+    if (updates.headline !== undefined) localStorage.setItem('candidate_headline', updates.headline);
+    if (updates.resume_name !== undefined) localStorage.setItem('candidate_resume_name', updates.resume_name);
+    localStorage.setItem('candidate_profile', JSON.stringify(merged));
   } catch (err) {
     console.warn('Could not save candidate profile to localStorage:', err);
   }
 
-  // Asynchronously synchronize with backend user profile
+  // Asynchronously synchronize with backend user profile via explicit endpoint
   try {
-    if (email) {
-      apiClient.post('/api/user/profile', {
-        email: email,
-        full_name: name,
-        phone: phone,
-        location: location,
-        skills: extractedSkills,
-        experience: experienceStr,
-      }).catch((apiErr) => {
-        console.debug('Profile backend sync note:', apiErr);
-      });
+    const payload: Record<string, any> = {};
+    if (updates.candidate_name !== undefined) payload.full_name = updates.candidate_name;
+    if (updates.phone !== undefined) payload.phone = updates.phone;
+    if (updates.location !== undefined) payload.location = updates.location;
+    if (updates.skills !== undefined) payload.skills = updates.skills;
+    if (updates.experience !== undefined) payload.experience = updates.experience;
+    if (updates.headline !== undefined) payload.job_role = updates.headline;
+    if (updates.summary !== undefined) payload.bio = updates.summary;
+    if (updates.education !== undefined && Array.isArray(updates.education) && updates.education.length > 0) {
+      payload.education = typeof updates.education[0] === 'string'
+        ? updates.education[0]
+        : (updates.education[0].degree || updates.education[0].institution || '');
     }
-  } catch (syncErr) {
-    console.debug('Profile sync initiation note:', syncErr);
+
+    await apiClient.post('/api/candidate/profile/sync-from-resume', {
+      selected_fields: payload
+    });
+  } catch (apiErr) {
+    console.debug('Profile sync note:', apiErr);
   }
 
   // Dispatch global profile update event
   try {
-    window.dispatchEvent(new CustomEvent('candidateProfileUpdated', { detail: profile }));
+    window.dispatchEvent(new CustomEvent('candidateProfileUpdated', { detail: merged }));
   } catch (evErr) {
     console.debug('CustomEvent dispatch note:', evErr);
   }
 
+  return merged;
+}
+
+/**
+ * Backward-compatible helper: extracts candidate profile details from resume response.
+ * CRITICAL ISOLATION: By default, does NOT overwrite candidate profile.
+ * Only overwrites if persist is explicitly set to true.
+ */
+export function applyProfileFromResume(data: any, fileName?: string, persist: boolean = false): CandidateProfile {
+  const profile = extractResumeProfileData(data, fileName);
+  if (persist) {
+    applyExplicitProfileUpdate(profile);
+  }
   return profile;
 }
 

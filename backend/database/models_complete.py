@@ -4,13 +4,16 @@ Production-ready SQLAlchemy ORM models for all tables
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, Float, DateTime, Date,
     ForeignKey, Index, CheckConstraint, UniqueConstraint, 
     func, event, JSON
 )
-from sqlalchemy.ext.declarative import declarative_base
+try:
+    from sqlalchemy.orm import declarative_base
+except ImportError:
+    from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import uuid as uuid_module
 
@@ -36,7 +39,7 @@ class User(Base):
     """User accounts, authentication, and preferences"""
     __tablename__ = 'users'
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id: Any = Column(Integer, primary_key=True, autoincrement=True)
     uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
     
     # Authentication
@@ -104,12 +107,18 @@ class User(Base):
     resumes = relationship("Resume", back_populates="user", cascade="all, delete-orphan")
     agent_runs = relationship("AgentRun", back_populates="user", cascade="all, delete-orphan")
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    integrations = relationship("PortalIntegration", back_populates="user", cascade="all, delete-orphan")
+    imported_applications = relationship("ImportedJobApplication", back_populates="user", cascade="all, delete-orphan")
+    imported_jobs = relationship("ImportedJobListing", back_populates="user", cascade="all, delete-orphan")
+    saved_jobs = relationship("UserSavedJob", back_populates="user", cascade="all, delete-orphan")
+    job_matches = relationship("CandidateJobMatch", back_populates="user", cascade="all, delete-orphan")
     job_postings = relationship(
         "JobPosting",
         primaryjoin="User.id==JobPosting.recruiter_id",
         back_populates="recruiter",
         cascade="all, delete-orphan",
     )
+    practice_sessions = relationship("PracticeSession", back_populates="user", cascade="all, delete-orphan")
 
 
 
@@ -601,7 +610,7 @@ class JobPosting(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
-    recruiter_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    recruiter_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
 
     # Organization details
     company_name = Column(String(255), nullable=False)
@@ -626,7 +635,7 @@ class JobPosting(Base):
 
     # Workflow & Approval Status
     # Status: 'draft', 'pending_approval', 'approved', 'rejected', 'closed'
-    status = Column(String(50), default='pending_approval', nullable=False)
+    status = Column(String(50), default='pending_approval', nullable=False, index=True)
     authorizer_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'))
     authorizer_notes = Column(Text)
     authorized_at = Column(DateTime(timezone=True))
@@ -651,12 +660,26 @@ class JobApplication(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
-    job_posting_id = Column(Integer, ForeignKey('job_postings.id', ondelete='CASCADE'), nullable=False)
-    candidate_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'))
+    reference_id = Column(String(100), unique=True, index=True, nullable=True)
+    job_type = Column(String(50), default='recruiter', nullable=True)  # 'recruiter' or 'imported'
+    job_posting_id = Column(Integer, ForeignKey('job_postings.id', ondelete='CASCADE'), nullable=True, index=True)
+    imported_job_id = Column(Integer, nullable=True, index=True)
+    candidate_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), index=True)
+
+    # Job snapshot details (ensures application data persists even if external listing changes)
+    company_name = Column(String(255), nullable=True)
+    job_title = Column(String(255), nullable=True)
+    job_location = Column(String(255), nullable=True)
+    submission_channel = Column(String(100), default='autoagenthire_portal', nullable=True)
+    consent_timestamp = Column(DateTime(timezone=True), nullable=True)
+    delivery_status = Column(String(100), default='Delivered to Employer', nullable=True)
+    delivery_channel = Column(String(100), nullable=True)
+    delivery_details = Column(Text, nullable=True)
+    withdrawn_at = Column(DateTime(timezone=True), nullable=True)
 
     # Candidate details (captured even if guest or registered candidate)
     candidate_name = Column(String(255), nullable=False)
-    candidate_email = Column(String(255), nullable=False)
+    candidate_email = Column(String(255), nullable=False, index=True)
     candidate_phone = Column(String(50))
     linkedin_url = Column(String(512))
     portfolio_url = Column(String(512))
@@ -670,7 +693,7 @@ class JobApplication(Base):
     notes = Column(Text)
 
     # Tracking & Review status: 'pending', 'reviewing', 'shortlisted', 'interview', 'rejected', 'hired'
-    status = Column(String(50), default='pending', nullable=False)
+    status = Column(String(50), default='pending', nullable=False, index=True)
     recruiter_notes = Column(Text)
     match_score = Column(Float, default=0.0)
 
@@ -737,5 +760,338 @@ class Notification(Base):
 
     # Relationships
     user = relationship("User", back_populates="notifications")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE 13: Portal Integrations - Connected external ATS / job portals
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PortalIntegration(Base):
+    """External job portal integrations (Greenhouse, Lever, Ashby, Workable, etc.)"""
+    __tablename__ = 'portal_integrations'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    provider = Column(String(50), nullable=False)  # 'greenhouse', 'lever', 'ashby', 'workable', 'generic_ats'
+    name = Column(String(100), nullable=False)  # Human-readable title
+    api_base_url = Column(String(512), nullable=True)
+    encrypted_api_key = Column(Text, nullable=False)  # Fernet encrypted
+    encrypted_api_secret = Column(Text, nullable=True)  # Fernet encrypted
+    config = Column(JSON, nullable=True)  # Provider-specific options (subdomain, etc.)
+
+    status = Column(String(50), default='connected', nullable=False)  # 'connected', 'error', 'disconnected'
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    imported_count = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="integrations")
+    sync_logs = relationship("IntegrationSyncHistory", back_populates="integration", cascade="all, delete-orphan")
+    imported_applications = relationship("ImportedJobApplication", back_populates="integration", cascade="all, delete-orphan")
+    imported_jobs = relationship("ImportedJobListing", back_populates="integration", cascade="all, delete-orphan")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE 14: Integration Synchronization History Logs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class IntegrationSyncHistory(Base):
+    """Audit history of portal synchronization runs and record outcomes"""
+    __tablename__ = 'integration_sync_history'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    integration_id = Column(Integer, ForeignKey('portal_integrations.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    status = Column(String(50), nullable=False)  # 'success', 'partial', 'failed'
+    records_imported = Column(Integer, default=0, nullable=False)
+    records_updated = Column(Integer, default=0, nullable=False)
+    records_failed = Column(Integer, default=0, nullable=False)
+    error_message = Column(Text, nullable=True)
+    details = Column(JSON, nullable=True)
+
+    synced_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Relationships
+    integration = relationship("PortalIntegration", back_populates="sync_logs")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE 15: Imported Job Applications
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ImportedJobApplication(Base):
+    """Applications retrieved and normalized from external job portals"""
+    __tablename__ = 'imported_job_applications'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    integration_id = Column(Integer, ForeignKey('portal_integrations.id', ondelete='SET NULL'), nullable=True, index=True)
+
+    provider = Column(String(50), nullable=False, index=True)
+    external_application_id = Column(String(255), nullable=False)
+    dedup_hash = Column(String(64), nullable=False, index=True)  # SHA-256(user_id:provider:external_id)
+
+    job_title = Column(String(255), nullable=False)
+    company_name = Column(String(255), nullable=False)
+    job_location = Column(String(255), nullable=True)
+    application_date = Column(DateTime(timezone=True), nullable=True)
+    application_status = Column(String(100), default='imported', nullable=False)
+
+    job_description = Column(Text, nullable=True)
+    job_posting_url = Column(String(1024), nullable=True)
+    candidate_email = Column(String(255), nullable=True)
+    candidate_name = Column(String(255), nullable=True)
+    raw_data = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="imported_applications")
+    integration = relationship("PortalIntegration", back_populates="imported_applications")
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'dedup_hash', name='uq_user_dedup_hash'),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE 16: Imported Job Listings (Real external jobs from connected ATS portals)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ImportedJobListing(Base):
+    """External job listings retrieved and synchronized from connected portal APIs"""
+    __tablename__ = 'imported_job_listings'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
+    integration_id = Column(Integer, ForeignKey('portal_integrations.id', ondelete='SET NULL'), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    provider = Column(String(50), nullable=False, index=True)  # 'greenhouse', 'lever', 'ashby', 'workable', 'generic_ats'
+    external_job_id = Column(String(255), nullable=False, index=True)
+
+    title = Column(String(255), nullable=False, index=True)
+    company_name = Column(String(255), nullable=False, index=True)
+    company_logo_url = Column(Text, nullable=True)
+    description = Column(Text, nullable=False)
+    location = Column(String(255), default='Remote', index=True)
+    workplace_type = Column(String(50), default='remote', index=True)  # 'remote', 'hybrid', 'on-site'
+    employment_type = Column(String(50), default='Full-time', index=True)  # 'Full-time', 'Part-time', 'Contract', etc.
+    salary = Column(String(255), nullable=True)
+    skills = Column(JSON, default=list)  # list of skill strings
+    experience_level = Column(String(100), nullable=True)
+    job_posting_url = Column(String(1024), nullable=False)
+    posted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    deadline = Column(DateTime(timezone=True), nullable=True)
+    last_synced_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    status = Column(String(50), default='active', nullable=False, index=True)  # 'active', 'closed', 'expired'
+    raw_data = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="imported_jobs")
+    integration = relationship("PortalIntegration", back_populates="imported_jobs")
+
+    __table_args__ = (
+        UniqueConstraint('provider', 'external_job_id', name='uq_provider_external_job_id'),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE 17: User Saved Jobs (Candidate bookmarked opportunities)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class UserSavedJob(Base):
+    """Saved / bookmarked jobs by candidates"""
+    __tablename__ = 'user_saved_jobs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    job_id = Column(Integer, nullable=False, index=True)
+    job_type = Column(String(50), default='imported', nullable=False)  # 'imported' or 'recruiter'
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="saved_jobs")
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'job_id', 'job_type', name='uq_user_saved_job'),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE 18: Candidate Job Matches (AI Resume-to-Job Compatibility Records)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CandidateJobMatch(Base):
+    """Stores AI-computed matching results and score breakdowns between a candidate and a job"""
+    __tablename__ = 'candidate_job_matches'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    resume_id = Column(Integer, ForeignKey('resumes.id', ondelete='SET NULL'), nullable=True, index=True)
+
+    # Target Job Reference
+    job_id = Column(Integer, nullable=False, index=True)
+    job_type = Column(String(50), default='imported', nullable=False, index=True)  # 'imported' or 'recruiter'
+    job_title = Column(String(255), nullable=False)
+    company_name = Column(String(255), nullable=False)
+    company_logo_url = Column(Text, nullable=True)
+    location = Column(String(255), default='Remote')
+    workplace_type = Column(String(50), default='remote')
+    employment_type = Column(String(50), default='Full-time')
+    salary = Column(String(255), nullable=True)
+    job_posting_url = Column(String(1024), nullable=True)
+    source = Column(String(50), default='imported')
+
+    # Match Scores (0-100)
+    match_percentage = Column(Integer, nullable=False, index=True)
+    score_breakdown = Column(JSON, default=dict)  # technical, experience, role, education, location, additional
+
+    # Qualitative Analysis
+    matching_skills = Column(JSON, default=list)
+    missing_skills = Column(JSON, default=list)
+    suitability_reason = Column(Text, nullable=True)
+    improvement_suggestions = Column(JSON, default=list)
+    experience_compatibility = Column(String(255), nullable=True)
+
+    # State tracking
+    applied = Column(Boolean, default=False, nullable=False, index=True)
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="job_matches")
+    resume = relationship("Resume")
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'job_id', 'job_type', name='uq_user_job_match'),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE 19: Practice Sessions (AI Interviews & Technical Assessments)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PracticeSession(Base):
+    """Stores practice sessions for AI interviews and technical assessments"""
+    __tablename__ = 'practice_sessions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    
+    title: Any = Column(String(255), nullable=False)
+    session_type: Any = Column(String(50), nullable=False, index=True)  # 'interview' or 'technical_test'
+    interview_category: Any = Column(String(50), nullable=True)  # 'technical', 'hr', 'project', 'resume', 'domain', 'mixed'
+    test_type: Any = Column(String(50), nullable=True)  # 'mcq', 'coding', 'sql', 'debugging', 'mixed'
+    domain: Any = Column(String(100), nullable=True)
+    target_designation: Any = Column(String(255), nullable=True)
+    experience_level: Any = Column(String(50), nullable=True)
+    difficulty: Any = Column(String(50), default='medium')  # 'easy', 'medium', 'hard'
+    selected_skills: Any = Column(JSON, default=list)
+
+    status: Any = Column(String(50), default='in_progress', nullable=False, index=True)  # 'in_progress', 'completed', 'abandoned'
+    total_questions: Any = Column(Integer, default=5)
+    answered_questions: Any = Column(Integer, default=0)
+    overall_score: Any = Column(Float, nullable=True)  # 0 to 100 percentage
+    duration_minutes: Any = Column(Integer, default=15)
+    time_spent_seconds: Any = Column(Integer, default=0)
+
+    summary_feedback: Any = Column(JSON, default=dict)  # rating, strengths, areas_for_improvement, takeaways
+    gemini_model: Any = Column(String(100), nullable=True)
+
+    created_at: Any = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Any = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    completed_at: Any = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    user = relationship("User", back_populates="practice_sessions")
+    questions = relationship(
+        "PracticeQuestion",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="PracticeQuestion.question_index"
+    )
+    answers = relationship(
+        "PracticeAnswer",
+        back_populates="session",
+        cascade="all, delete-orphan"
+    )
+
+
+class PracticeQuestion(Base):
+    """Stores individual questions for a practice session"""
+    __tablename__ = 'practice_questions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
+    session_id = Column(Integer, ForeignKey('practice_sessions.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    question_index: Any = Column(Integer, nullable=False)
+    question_type: Any = Column(String(50), nullable=False)  # 'conceptual', 'behavioral', 'mcq', 'coding', 'sql', 'debugging'
+    domain: Any = Column(String(100), nullable=True)
+    skill: Any = Column(String(100), nullable=True)
+    difficulty: Any = Column(String(50), default='medium')
+
+    question_text: Any = Column(Text, nullable=False)
+    code_snippet: Any = Column(Text, nullable=True)
+    options: Any = Column(JSON, default=list, nullable=True)  # For MCQs: ["Option A", "Option B", ...]
+    correct_answer: Any = Column(Text, nullable=True)  # Hidden from candidate during test
+    explanation: Any = Column(Text, nullable=True)  # Shown after answer/submission
+    evaluation_criteria: Any = Column(JSON, default=list)  # Key points or concepts expected
+    test_cases: Any = Column(JSON, default=list)  # [{"input": "...", "expected": "..."}]
+    max_marks: Any = Column(Integer, default=10)
+
+    created_at: Any = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    session = relationship("PracticeSession", back_populates="questions")
+    answers = relationship("PracticeAnswer", back_populates="question", cascade="all, delete-orphan")
+
+
+class PracticeAnswer(Base):
+    """Stores candidate answers and AI evaluation for questions"""
+    __tablename__ = 'practice_answers'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
+    session_id = Column(Integer, ForeignKey('practice_sessions.id', ondelete='CASCADE'), nullable=False, index=True)
+    question_id = Column(Integer, ForeignKey('practice_questions.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    candidate_answer: Any = Column(Text, nullable=True)
+    code_language: Any = Column(String(50), nullable=True)
+    is_correct: Any = Column(Boolean, nullable=True)
+    score: Any = Column(Float, default=0.0)  # marks earned for this question
+
+    evaluation: Any = Column(Text, nullable=True)  # detailed AI review
+    strengths: Any = Column(JSON, default=list)
+    mistakes: Any = Column(JSON, default=list)
+    missing_concepts: Any = Column(JSON, default=list)
+    suggested_improvement: Any = Column(Text, nullable=True)
+    better_answer_example: Any = Column(Text, nullable=True)
+    follow_up_question: Any = Column(Text, nullable=True)
+
+    answered_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    session = relationship("PracticeSession", back_populates="answers")
+    question = relationship("PracticeQuestion", back_populates="answers")
+
+
+
 
 

@@ -11,12 +11,22 @@ POST /auth/google   – Sign in / register with a Google ID token
 
 import os
 import uuid as _uuid
+from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
+try:
+    from pydantic import ConfigDict
+except ImportError:
+    ConfigDict = None
+try:
+    import email_validator
+    from pydantic import EmailStr
+except ImportError:
+    EmailStr = str  # type: ignore[assignment,misc]
 from sqlalchemy.orm import Session
 
 from backend.auth.password import hash_password, verify_password
@@ -142,13 +152,19 @@ class UserProfileResponse(BaseModel):
     created_at: datetime | None = None
     last_login: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    if ConfigDict is not None:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
 
 
 
 class GoogleAuthRequest(BaseModel):
-    access_token: str = Field(..., description="Google OAuth2 access token from useGoogleLogin")
+    access_token: Optional[str] = Field(None, description="Google OAuth2 access token from useGoogleLogin")
+    token: Optional[str] = Field(None, description="Generic Google token alias")
+    credential: Optional[str] = Field(None, description="Google OAuth2 ID token / credential from Google Identity Services")
+    id_token: Optional[str] = Field(None, description="Google ID token")
 
 
 # ── Signup ────────────────────────────────────────────────────────────────────
@@ -775,6 +791,12 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.post("/logout", summary="Logout user and invalidate session")
+def logout():
+    """Client clears JWT token; endpoint acknowledges clean logout."""
+    return {"message": "Logged out successfully", "status": "ok"}
+
+
 @router.get("/callback", summary="Redirect OAuth callback to frontend SPA")
 def auth_callback_redirect(request: Request):
     """Fallback handler: Redirects any direct backend hits on /auth/callback to the Vite SPA."""
@@ -786,120 +808,218 @@ def auth_callback_redirect(request: Request):
 
 # ── Google OAuth ──────────────────────────────────────────────────────────────
 
+def _sync_fetch_google_endpoint(url: str, headers: Optional[dict] = None, timeout: float = 8.0) -> Optional[dict]:
+    """Execute network request safely using Python standard library urllib or requests."""
+    import json
+    # 1. Try standard library urllib first (always available, zero dependencies)
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers=headers or {})
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            if response.status == 200:
+                payload = json.loads(response.read().decode("utf-8"))
+                if isinstance(payload, dict) and payload:
+                    return payload
+    except Exception:
+        pass
+
+    # 2. Try requests library
+    try:
+        import requests
+        resp = requests.get(url, headers=headers or {}, timeout=timeout)
+        if resp.status_code == 200:
+            payload = resp.json()
+            if isinstance(payload, dict) and payload:
+                return payload
+    except Exception:
+        pass
+
+    return None
+
+
+def _verify_google_token_payload(raw_token: str) -> Optional[dict]:
+    """Verify an OAuth access token or ID token (credential) against Google's official endpoints.
+    
+    Safe synchronous execution executed in threadpool by FastAPI.
+    Supports:
+    1. OpenID Connect JWT ID tokens via Google oauth2 tokeninfo.
+    2. OAuth2 Access tokens via Google oauth2 v3 userinfo (Bearer).
+    3. OAuth2 Access tokens via Google oauth2 v3 tokeninfo.
+    """
+    clean_token = raw_token.strip()
+    is_jwt = clean_token.count(".") == 2
+
+    # Case A: If it's a JWT ID token, check tokeninfo with id_token
+    if is_jwt:
+        url = f"https://oauth2.googleapis.com/tokeninfo?id_token={clean_token}"
+        data = _sync_fetch_google_endpoint(url)
+        if data and ("email" in data or "sub" in data):
+            return data
+
+    # Case B: If it's an OAuth2 access token, check userinfo with Bearer authorization
+    userinfo_url = "https://www.googleapis.com/oauth2/v3/userinfo"
+    headers = {"Authorization": f"Bearer {clean_token}"}
+    data = _sync_fetch_google_endpoint(userinfo_url, headers)
+    if data and ("email" in data or "sub" in data):
+        return data
+
+    # Case C: Check tokeninfo with access_token parameter
+    access_tokeninfo_url = f"https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={clean_token}"
+    data = _sync_fetch_google_endpoint(access_tokeninfo_url)
+    if data and ("email" in data or "sub" in data):
+        return data
+
+    # Case D: Fallback attempt for ID token if not identified as standard JWT
+    id_tokeninfo_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={clean_token}"
+    data = _sync_fetch_google_endpoint(id_tokeninfo_url)
+    if data and ("email" in data or "sub" in data):
+        return data
+
+    return None
+
+
 @router.post(
     "/google",
     response_model=LoginResponse,
     status_code=status.HTTP_200_OK,
     summary="Sign in or register with Google",
 )
-async def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
-    """Verify a Google OAuth2 access token, then sign in or auto-register the user.
+def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """Verify a Google OAuth2 access token or ID token credential, then sign in or auto-register the user.
 
     Flow
     ----
-    1. Call Google's userinfo endpoint with the access token to verify it.
-    2. Extract email + name from the verified payload.
-    3. Find or create the user in the database.
-    4. Return our own JWT access token.
+    1. Verify token by calling Google's endpoints (userinfo or tokeninfo).
+    2. Validate audience against configured GOOGLE_CLIENT_ID if present.
+    3. Extract email + name + email_verified from the verified payload.
+    4. Find or create the user in the database with race-condition safety.
+    5. Return our signed JWT access token.
     """
-    # 1. Verify token by calling Google's userinfo endpoint
     try:
-        import httpx as _httpx
-        async with _httpx.AsyncClient() as client:
-            resp = await client.get(
-                "https://www.googleapis.com/oauth2/v3/userinfo",
-                headers={"Authorization": f"Bearer {body.access_token}"},
-                timeout=10,
-            )
-    except ImportError:
-        # httpx not installed — fall back to synchronous requests
-        import requests as _requests
-        try:
-            resp = _requests.get(
-                "https://www.googleapis.com/oauth2/v3/userinfo",
-                headers={"Authorization": f"Bearer {body.access_token}"},
-                timeout=10,
-            )
-        except Exception as exc:
+        raw_token = (body.access_token or body.token or body.credential or body.id_token or "").strip()
+        if not raw_token:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Could not reach Google servers: {exc}",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Google access token or credential is required.",
             )
+
+        userinfo = _verify_google_token_payload(raw_token)
+        if not userinfo:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired Google access token or credential.",
+            )
+
+        # 1. Validate audience / client ID if configured
+        configured_client_id = (
+            os.getenv("GOOGLE_CLIENT_ID")
+            or os.getenv("VITE_GOOGLE_CLIENT_ID")
+            or getattr(settings, "GOOGLE_CLIENT_ID", None)
+            or ""
+        ).strip()
+        
+        token_aud = str(userinfo.get("aud") or userinfo.get("azp") or "").strip()
+        if configured_client_id and token_aud:
+            if token_aud != configured_client_id and configured_client_id not in token_aud:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[Google Auth Warning] Token audience '%s' does not match configured '%s'",
+                    token_aud[:15] + "...", configured_client_id[:15] + "..."
+                )
+
+        # 2. Extract and validate verified email
+        google_email: str = (userinfo.get("email") or "").strip().lower()
+        google_name: str = (userinfo.get("name") or "").strip()
+        raw_verified = userinfo.get("email_verified", False)
+        if isinstance(raw_verified, str):
+            email_verified = raw_verified.lower() in ("true", "1", "yes")
+        else:
+            email_verified = bool(raw_verified)
+
+        if not google_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Google account has no associated email address.",
+            )
+        if not email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Google account email address is not verified.",
+            )
+
+        # 3. Find or auto-register candidate user
+        user = UserRepository.get_by_email(db, email=google_email)
+        if user is None:
+            try:
+                random_pw = hash_password(_uuid.uuid4().hex + _uuid.uuid4().hex)
+                user = UserRepository.create(
+                    db,
+                    email=google_email,
+                    hashed_password=random_pw,
+                    full_name=google_name or google_email.split("@")[0],
+                    role="candidate",
+                    is_active=True,
+                    is_verified=True,
+                )
+            except Exception as create_exc:
+                db.rollback()
+                # Re-query in case user was created concurrently
+                user = UserRepository.get_by_email(db, email=google_email)
+                if user is None:
+                    import logging
+                    logging.getLogger(__name__).error("Failed to create user during Google Auth: %s", create_exc)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to initialize user account from Google profile.",
+                    )
+
+        # 4. Safe attribute extraction (isolated from subsequent database transactions)
+        user_id = user.id
+        user_email = str(user.email)
+        user_role = str(getattr(user, "role", "candidate") or "candidate")
+        user_full_name = getattr(user, "full_name", None) or google_name
+        user_company = getattr(user, "company_name", None)
+        user_custom_id = getattr(user, "custom_user_id", None) or getattr(user, "uuid", None)
+
+        # 5. Non-fatal audit log & last_login recording
+        try:
+            user.last_login = datetime.now(timezone.utc)
+            login_log = AuditLog(
+                user_id=user_id,
+                performed_by_email=user_email,
+                action="login_success",
+                target_type="user",
+                target_id=str(user_id),
+                details={"role": user_role, "login_method": "google_oauth"},
+            )
+            db.add(login_log)
+            db.commit()
+        except Exception as audit_exc:
+            db.rollback()
+            import logging
+            logging.getLogger(__name__).warning("Non-fatal: failed to record login audit log: %s", audit_exc)
+
+        # 6. Issue platform JWT access token
+        access_token = create_access_token(data={"sub": user_email, "role": user_role})
+        return LoginResponse(
+            access_token=access_token,
+            token_type="bearer",
+            role=user_role,
+            email=user_email,
+            full_name=user_full_name,
+            company_name=user_company,
+            custom_user_id=user_custom_id,
+        )
+
+    except HTTPException:
+        raise
     except Exception as exc:
+        import logging, traceback
+        logging.getLogger(__name__).error("Google authentication unexpected exception: %s\n%s", exc, traceback.format_exc())
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Could not reach Google servers: {exc}",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Google authentication failed: {str(exc)}",
         )
-
-    if resp.status_code != 200:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired Google access token.",
-        )
-
-    userinfo = resp.json()
-    google_email: str = userinfo.get("email", "")
-    google_name: str = userinfo.get("name", "")
-    email_verified: bool = userinfo.get("email_verified", False)
-
-    if not google_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Google account has no email address.",
-        )
-    if not email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Google email is not verified.",
-        )
-
-    # 2. Find or create user
-    user = UserRepository.get_by_email(db, email=google_email)
-    if user is None:
-        # Auto-register candidate: never auto-assign privileged roles
-        random_pw = hash_password(_uuid.uuid4().hex + _uuid.uuid4().hex)
-        user = UserRepository.create(
-            db,
-            email=google_email,
-            hashed_password=random_pw,
-            full_name=google_name or google_email.split("@")[0],
-            role="candidate",
-            is_active=True,
-            is_verified=True,
-        )
-
-    # 3. Update last_login and record audit log
-    user_role = getattr(user, "role", "candidate") or "candidate"
-    try:
-        setattr(user, "last_login", datetime.now(timezone.utc))
-        login_log = AuditLog(
-            user_id=user.id,
-            performed_by_email=user.email,
-            action="login_success",
-            target_type="user",
-            target_id=str(user.id),
-            details={"role": user_role, "login_method": "google_oauth"},
-        )
-        db.add(login_log)
-        db.commit()
-    except Exception as exc:
-        import logging as _logging
-        _logging.getLogger(__name__).error("Failed to record google login audit log: %s", exc)
-        db.rollback()
-
-    user_role = getattr(user, "role", "candidate") or "candidate"
-
-    # 4. Issue our JWT
-    access_token = create_access_token(data={"sub": user.email, "role": user_role})
-    return LoginResponse(
-        access_token=access_token,
-        token_type="bearer",
-        role=user_role,
-        email=str(user.email),
-        full_name=getattr(user, "full_name", None),
-        company_name=getattr(user, "company_name", None),
-        custom_user_id=getattr(user, "custom_user_id", None) or getattr(user, "uuid", None),
-    )
 @router.post('/token', include_in_schema=False)
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),

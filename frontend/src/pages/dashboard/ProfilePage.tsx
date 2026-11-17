@@ -211,29 +211,28 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="container max-w-5xl mx-auto p-4 md:p-6 space-y-6">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/10">
+    <div className="container max-w-5xl mx-auto space-y-6 text-[#202722]">
+      {/* Editorial Header Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E6E5DC]">
         <div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="border-primary/40 text-primary px-2.5 py-0.5 text-xs">
-              <ShieldCheck className="w-3.5 h-3.5 mr-1" />
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
               Verified Candidate
-            </Badge>
+            </span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1 text-foreground">
-            My Candidate Profile
+          <h1 className="font-serif text-3xl sm:text-4xl font-normal text-[#123B32] tracking-tight">
+            Candidate Credentials & Profile
           </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            Manage your personal profile, contact information, qualifications, and job preferences.
+          <p className="text-xs sm:text-sm text-[#777D74] mt-0.5">
+            Manage your personal profile, credentials, contact information, qualifications, and employment history.
           </p>
         </div>
 
         <Button
           onClick={handleOpenEdit}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25 gap-2 shrink-0"
+          className="bg-[#123B32] hover:bg-[#1C5246] text-[#F7F5EF] text-xs font-semibold px-5 py-2.5 h-10 rounded-lg shadow-sm gap-2 shrink-0"
         >
-          <Edit3 className="w-4 h-4" />
+          <Edit3 className="w-4 h-4 text-[#FF7058]" />
           <span>Edit Profile</span>
         </Button>
       </div>
@@ -241,42 +240,42 @@ export default function ProfilePage() {
       {/* Main Profile Presentation Card */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Photo & Key Badges */}
-        <Card variant="glass" className="border-primary/20 bg-gradient-to-b from-primary/10 via-card to-card text-center p-6 space-y-5">
-          <div className="relative mx-auto w-32 h-32">
+        <div className="p-6 rounded-2xl bg-white border border-[#E6E5DC] editorial-shadow text-center space-y-5">
+          <div className="relative mx-auto w-28 h-28">
             <img
               src={profile.avatar_url || DEFAULT_AVATARS[0]}
               alt={profile.full_name}
-              className="w-32 h-32 rounded-3xl object-cover border-2 border-primary/40 shadow-xl shadow-primary/20 mx-auto"
+              className="w-28 h-28 rounded-2xl object-cover border border-[#E6E5DC] shadow-sm mx-auto"
             />
             <button
               onClick={handleOpenEdit}
-              className="absolute -bottom-2 -right-2 p-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-md transition-transform hover:scale-110"
+              className="absolute -bottom-1.5 -right-1.5 p-2 rounded-lg bg-[#FF7058] text-white hover:bg-[#FA5D42] shadow-sm transition-transform hover:scale-105"
               title="Change Photo"
             >
-              <Camera className="w-4 h-4" />
+              <Camera className="w-3.5 h-3.5" />
             </button>
           </div>
 
           <div className="space-y-1">
-            <h2 className="text-xl font-bold text-foreground">{profile.full_name || "Candidate Name"}</h2>
-            <p className="text-sm font-medium text-primary">{profile.job_role || "Job Role Not Set"}</p>
-            <p className="text-xs text-muted-foreground flex items-center justify-center gap-1 pt-1">
-              <MapPin className="w-3.5 h-3.5" />
+            <h2 className="font-serif text-2xl font-bold text-[#123B32]">{profile.full_name || "Candidate Name"}</h2>
+            <p className="text-xs font-semibold text-[#FF7058]">{profile.job_role || "Role Not Specified"}</p>
+            <p className="text-xs text-[#777D74] flex items-center justify-center gap-1 pt-1">
+              <MapPin className="w-3.5 h-3.5 text-[#123B32]" />
               <span>{profile.location || "Location Not Specified"}</span>
             </p>
           </div>
 
-          <div className="pt-2 border-t border-white/10 space-y-2 text-xs">
+          <div className="pt-3 border-t border-[#E6E5DC] space-y-2 text-xs">
             <div className="flex items-center justify-between py-1">
-              <span className="text-muted-foreground">Account Status:</span>
-              <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+              <span className="text-[#777D74]">Account Status:</span>
+              <span className="text-xs font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                 Active & Verified
-              </Badge>
+              </span>
             </div>
             {profile.custom_user_id && (
               <div className="flex items-center justify-between py-1">
-                <span className="text-muted-foreground">Candidate ID:</span>
-                <span className="font-mono font-semibold text-primary">{profile.custom_user_id}</span>
+                <span className="text-[#777D74]">Candidate ID:</span>
+                <span className="font-mono font-bold text-xs text-[#123B32]">{profile.custom_user_id}</span>
               </div>
             )}
             <div className="flex items-center justify-between py-1">
@@ -288,12 +287,12 @@ export default function ProfilePage() {
           <Button
             variant="outline"
             onClick={handleOpenEdit}
-            className="w-full gap-2 border-white/15 hover:bg-white/5"
+            className="w-full gap-2 border-[#E6E5DC] hover:border-[#123B32] text-[#123B32] text-xs font-semibold"
           >
-            <Edit3 className="w-3.5 h-3.5 text-primary" />
+            <Edit3 className="w-3.5 h-3.5 text-[#FF7058]" />
             <span>Update Details</span>
           </Button>
-        </Card>
+        </div>
 
         {/* Right Column: Detailed Sections (Names, Mobile, Email, Education, Qualification, Job Role) */}
         <div className="lg:col-span-2 space-y-6">

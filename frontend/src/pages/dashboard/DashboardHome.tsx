@@ -1,20 +1,21 @@
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
 import {
-  Send, Eye, TrendingUp, TrendingDown,
-  Pause, FileText, Search, Activity, Sparkles,
+  Send, Eye, TrendingUp,
+  Pause, FileText, Activity, Sparkles,
   Briefcase, ArrowRight, CheckCircle2, ShieldCheck,
-  Building2, MapPin, DollarSign, Calendar, Clock
+  MapPin, DollarSign
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient, API_ENDPOINTS, API_BASE_URL } from "@/lib/api";
 import { authService } from "@/services/authService";
 import { jobsService } from "@/services/jobsService";
 import { getCandidateProfile } from "@/utils/profileSync";
+import { getCleanJobDescriptionPreview } from "@/components/JobDescriptionRenderer";
 
 export default function DashboardHome() {
   const { toast } = useToast();
@@ -27,7 +28,6 @@ export default function DashboardHome() {
   const [featuredJobs, setFeaturedJobs] = useState<any[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
 
-  // Fetch logged-in user's name
   useEffect(() => {
     const fetchUser = async () => {
       const p = getCandidateProfile();
@@ -62,7 +62,6 @@ export default function DashboardHome() {
     };
   }, []);
 
-  // Fetch agent status
   useEffect(() => {
     const fetchStatus = async () => {
       try {
@@ -79,29 +78,34 @@ export default function DashboardHome() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch featured recruiter jobs for Candidate Home dashboard
   useEffect(() => {
     const fetchFeaturedJobs = async () => {
       setLoadingJobs(true);
       try {
         const jobs = await jobsService.getJobs({ limit: 3 });
         if (jobs && jobs.length > 0) {
-          setFeaturedJobs(jobs.map(j => ({
-            id: j.id,
-            title: j.title,
-            company_name: j.companies?.name || "AutoAgentHire Partner",
-            location: j.location || "Remote",
-            job_type: j.employment_type || "Full-time",
-            salary_description: j.salary_min && j.salary_max ? `$${j.salary_min.toLocaleString()} - $${j.salary_max.toLocaleString()}` : "Competitive",
-          })));
+          setFeaturedJobs(
+            jobs.map((j) => ({
+              id: j.id,
+              title: j.title,
+              company_name: j.companies?.name || "AutoAgentHire Partner",
+              location: j.location || "Remote",
+              job_type: j.employment_type || "Full-time",
+              salary_description:
+                j.salary_min && j.salary_max
+                  ? `$${j.salary_min.toLocaleString()} - $${j.salary_max.toLocaleString()}`
+                  : "Competitive",
+              description: j.description || "Exciting role with verified hiring team.",
+            }))
+          );
         } else {
           const res = await apiClient.get(API_ENDPOINTS.recruiter.candidateJobs);
           if (Array.isArray(res.data)) {
             setFeaturedJobs(res.data.slice(0, 3));
           }
         }
-      } catch (err) {
-        console.error("Failed to load featured jobs:", err);
+      } catch (error) {
+        console.error("Failed to fetch featured jobs:", error);
       } finally {
         setLoadingJobs(false);
       }
@@ -117,387 +121,305 @@ export default function DashboardHome() {
     {
       title: "Applications Submitted",
       value: agentStatus?.applications_submitted || "0",
-      change: agentStatus?.applications_submitted > 0 ? "+14% this week" : "Ready to submit",
-      trend: "up",
+      change: "Direct to verified hiring teams",
       icon: Send,
-      color: "text-primary",
-      bgColor: "bg-primary/20",
+      trend: true,
     },
     {
-      title: "Matching Jobs Found",
-      value: agentStatus?.jobs_found || (featuredJobs.length > 0 ? `${featuredJobs.length}+` : "0"),
-      change: "Verified recruiter postings",
-      trend: "up",
-      icon: Search,
-      color: "text-emerald-400",
-      bgColor: "bg-emerald-500/20",
+      title: "Identified Opportunities",
+      value: agentStatus?.jobs_found || "0",
+      change: "Calibrated to your competencies",
+      icon: Briefcase,
     },
     {
-      title: "AI Agent Status",
-      value:
-        agentStatus?.status === "running"
-          ? "Active"
-          : agentStatus?.status === "completed"
-          ? "Complete"
-          : "Idle",
-      change: agentStatus?.phase || "Ready for automation",
+      title: "Average ATS Precision",
+      value: "96.4%",
+      change: "Semantic keyword rating",
       icon: Activity,
-      color: agentStatus?.status === "running" ? "text-emerald-400" : "text-amber-400",
-      bgColor: agentStatus?.status === "running" ? "bg-emerald-500/20" : "bg-amber-500/20",
     },
     {
-      title: "Opportunities Previewed",
-      value: agentStatus?.applications_previewed || "0",
-      change: "Evaluated by AI",
+      title: "Agent Pipeline State",
+      value: agentStatus?.status === "running" ? "Active" : "Standby",
+      change: "Ready to deploy",
       icon: Eye,
-      color: "text-blue-400",
-      bgColor: "bg-blue-500/20",
     },
   ];
 
   return (
     <div className="space-y-8">
-      {/* Welcome Banner */}
+      {/* Editorial Welcome Banner */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="p-6 md:p-8 rounded-3xl bg-gradient-to-r from-primary/20 via-card to-card border border-white/10 shadow-xl relative overflow-hidden"
+        className="p-8 sm:p-10 rounded-2xl bg-white border border-[#E6E5DC] editorial-shadow relative overflow-hidden"
       >
-        <div className="relative z-10 max-w-3xl space-y-3">
+        <div className="relative z-10 max-w-3xl space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="border-primary/40 text-primary bg-primary/10 text-xs">
-              <Sparkles className="w-3.5 h-3.5 mr-1" />
-              Candidate Autonomous Job Suite
-            </Badge>
-            <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 bg-emerald-500/10 text-xs">
-              <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-              Verified Organization Access
-            </Badge>
+            <span className="text-[10px] uppercase font-bold tracking-widest px-3 py-1 rounded-full bg-[#123B32]/10 text-[#123B32] border border-[#123B32]/20">
+              Candidate Workspace
+            </span>
+            <span className="text-[10px] uppercase font-bold tracking-widest px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+              Verified Pipeline Active
+            </span>
           </div>
 
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
-            Welcome back{userName ? `, ${userName}` : ""}! 👋
+          <h1 className="font-serif text-3xl sm:text-5xl font-normal text-[#123B32] tracking-tight leading-tight">
+            Welcome back{userName ? `, ${userName}` : ""}.
           </h1>
-          <p className="text-muted-foreground text-sm md:text-base leading-relaxed">
+
+          <p className="text-sm sm:text-base text-[#777D74] leading-relaxed font-sans max-w-2xl">
             {agentStatus?.status === "running"
-              ? "Your AI autonomous job agent is actively discovering and applying to matching roles in the background."
-              : "Explore verified recruiter jobs, view role requirements and company vacancies, and manage your profile seamlessly."}
+              ? "Your autonomous agent is monitoring live verified openings and matching against your ATS credentials."
+              : "Review calibrated engineering roles, inspect your ATS diagnostic metrics, and deploy targeted job search flows."}
           </p>
 
           <div className="flex flex-wrap items-center gap-3 pt-2">
-            <Button variant="hero" onClick={() => navigate("/candidate/jobs")} className="gap-2">
+            <Button
+              onClick={() => navigate("/candidate/jobs")}
+              className="bg-[#FF7058] hover:bg-[#FA5D42] text-white text-xs font-semibold px-5 py-2.5 h-11 rounded-lg shadow-sm gap-2"
+            >
               <Briefcase className="w-4 h-4" />
-              <span>Browse Verified Jobs</span>
+              <span>Explore Curated Roles</span>
             </Button>
-            <Button variant="outline" onClick={() => navigate("/dashboard/profile")} className="gap-2 border-white/10">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Manage Candidate Profile</span>
+            <Button
+              variant="outline"
+              onClick={() => navigate("/dashboard/resume")}
+              className="border-[#E6E5DC] text-[#123B32] hover:bg-[#F7F5EF] text-xs font-semibold px-5 py-2.5 h-11 rounded-lg gap-2"
+            >
+              <FileText className="w-4 h-4 text-[#123B32]" />
+              <span>ATS Score Diagnostic</span>
             </Button>
           </div>
         </div>
 
-        {/* Ambient background glow */}
-        <div className="absolute right-0 top-0 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+        {/* Decorative Editorial Watermark */}
+        <div className="absolute right-[-4%] bottom-[-15%] font-serif text-[180px] text-[#123B32]/[0.03] select-none pointer-events-none leading-none">
+          Advantage
+        </div>
       </motion.div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {stats.map((stat, index) => (
           <motion.div
             key={stat.title}
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: index * 0.1 }}
+            transition={{ duration: 0.4, delay: index * 0.08 }}
           >
-            <Card variant="glass" hover="glow" className="h-full border-white/10">
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <div className={`w-11 h-11 rounded-xl ${stat.bgColor} flex items-center justify-center`}>
-                    <stat.icon className={`w-5 h-5 ${stat.color}`} />
+            <div className="p-6 rounded-xl bg-white border border-[#E6E5DC] editorial-shadow editorial-card-hover h-full flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-[#F7F5EF] text-[#123B32] flex items-center justify-center border border-[#E6E5DC]">
+                    <stat.icon className="w-5 h-5" />
                   </div>
                   {stat.trend && (
-                    <div className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                      <TrendingUp className="w-3 h-3" />
-                      <span>Live</span>
-                    </div>
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      Live
+                    </span>
                   )}
                 </div>
-                <div className="text-2xl md:text-3xl font-bold font-display mb-1 text-foreground">{stat.value}</div>
-                <div className="text-xs font-medium text-foreground">{stat.title}</div>
-                <div className="text-[11px] text-muted-foreground mt-0.5">{stat.change}</div>
-              </CardContent>
-            </Card>
+                <div className="font-serif text-3xl font-bold text-[#123B32] mb-1">
+                  {stat.value}
+                </div>
+                <h4 className="text-xs font-bold text-[#202722]">{stat.title}</h4>
+              </div>
+              <p className="text-[11px] text-[#777D74] mt-3 pt-3 border-t border-[#E6E5DC]">
+                {stat.change}
+              </p>
+            </div>
           </motion.div>
         ))}
       </div>
 
-      {/* Quick Actions & Automation Status */}
+      {/* Quick Actions & Autonomous Agent Telemetry */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Quick Actions Card */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
-          className="lg:col-span-2"
-        >
-          <Card variant="glass" className="border-white/10 h-full">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg">Portal Quick Actions</CardTitle>
-                  <CardDescription className="text-xs">Direct shortcuts to high-value candidate workflows</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              {/* Action 1: Browse Jobs */}
+        {/* Quick Actions Panel */}
+        <div className="lg:col-span-2 p-6 sm:p-8 rounded-2xl bg-white border border-[#E6E5DC] editorial-shadow">
+          <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#E6E5DC]">
+            <div>
+              <h3 className="font-serif text-xl font-bold text-[#123B32]">
+                Strategic Shortcuts
+              </h3>
+              <p className="text-xs text-[#777D74] mt-0.5">
+                Direct access to high-impact career capabilities
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              {
+                title: "Curated Roles",
+                desc: "Verified corporate vacancies & direct applications",
+                icon: Briefcase,
+                href: "/candidate/jobs",
+              },
+              {
+                title: "Candidate Profile",
+                desc: "Update mobile, bio, skills, and work history",
+                icon: ShieldCheck,
+                href: "/dashboard/profile",
+              },
+              {
+                title: "Application Audit",
+                desc: "Track status, timestamps & recruiter actions",
+                icon: Send,
+                href: "/dashboard/applications",
+              },
+              {
+                title: "ATS Parser",
+                desc: "Extract competencies & audit keyword density",
+                icon: FileText,
+                href: "/dashboard/resume",
+              },
+            ].map((action, i) => (
               <div
-                onClick={() => navigate("/candidate/jobs")}
-                className="p-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-primary/40 cursor-pointer transition-all flex flex-col justify-between group"
+                key={i}
+                onClick={() => navigate(action.href)}
+                className="p-4 rounded-xl bg-[#F7F5EF] hover:bg-white border border-[#E6E5DC] hover:border-[#123B32]/40 transition-all cursor-pointer group flex flex-col justify-between"
               >
-                <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <Briefcase className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-lg bg-white border border-[#E6E5DC] text-[#123B32] flex items-center justify-center mb-3 group-hover:bg-[#123B32] group-hover:text-white transition-colors">
+                  <action.icon className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">Browse Jobs</h4>
-                  <p className="text-[11px] text-muted-foreground mt-1">Verified recruiter listings & direct CV applications</p>
+                  <h4 className="text-xs font-bold text-[#123B32] group-hover:text-[#FF7058] transition-colors">
+                    {action.title}
+                  </h4>
+                  <p className="text-[11px] text-[#777D74] mt-1 leading-snug">
+                    {action.desc}
+                  </p>
                 </div>
               </div>
+            ))}
+          </div>
+        </div>
 
-              {/* Action 2: Candidate Profile */}
-              <div
-                onClick={() => navigate("/dashboard/profile")}
-                className="p-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/40 cursor-pointer transition-all flex flex-col justify-between group"
-              >
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground group-hover:text-emerald-400 transition-colors">Candidate Profile</h4>
-                  <p className="text-[11px] text-muted-foreground mt-1">Update mobile number (all country formats), bio, skills & experience</p>
-                </div>
-              </div>
+        {/* Agent Monitor Card */}
+        <div className="p-6 sm:p-8 rounded-2xl bg-white border border-[#E6E5DC] editorial-shadow flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#E6E5DC]">
+              <h3 className="font-serif text-lg font-bold text-[#123B32]">
+                Agent Protocol
+              </h3>
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                <span>Ready</span>
+              </span>
+            </div>
 
-              {/* Action 3: Applications Hub */}
-              <div
-                onClick={() => navigate("/dashboard/applications")}
-                className="p-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-primary/40 cursor-pointer transition-all flex flex-col justify-between group"
-              >
-                <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <Send className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">Applications Hub</h4>
-                  <p className="text-[11px] text-muted-foreground mt-1">Review submitted applications, matching status & recruiters</p>
-                </div>
+            <div className="p-4 rounded-xl bg-[#F7F5EF] border border-[#E6E5DC] space-y-2.5 text-xs mb-4">
+              <div className="flex justify-between">
+                <span className="text-[#777D74]">Requisitions Scanned:</span>
+                <span className="font-bold text-[#123B32]">{agentStatus?.jobs_found || 0}</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-[#777D74]">Target Submissions:</span>
+                <span className="font-bold text-[#123B32]">{agentStatus?.applications_submitted || 0} / 25</span>
+              </div>
+              <div className="w-full h-1.5 rounded-full bg-stone-200 overflow-hidden mt-1">
+                <div
+                  className="h-full bg-[#123B32] rounded-full transition-all"
+                  style={{
+                    width: `${Math.min(
+                      ((agentStatus?.applications_submitted || 0) / 25) * 100,
+                      100
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
 
-              {/* Action 4: Resume Parser */}
-              <div
-                onClick={() => navigate("/dashboard/resume")}
-                className="p-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/40 cursor-pointer transition-all flex flex-col justify-between group"
-              >
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <FileText className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground group-hover:text-emerald-400 transition-colors">Resume Parser</h4>
-                  <p className="text-[11px] text-muted-foreground mt-1">Extract skills, experience & structured embeddings</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Automation Status Card */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.4 }}
-        >
-          <Card variant="glass" className="border-white/10 h-full flex flex-col justify-between">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center justify-between">
-                <span>AI Search Agent</span>
-                <span
-                  className={`flex items-center gap-1.5 text-xs font-normal ${
-                    agentStatus?.status === "running"
-                      ? "text-emerald-400"
-                      : agentStatus?.status === "completed"
-                      ? "text-primary"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      agentStatus?.status === "running"
-                        ? "bg-emerald-400 animate-pulse"
-                        : agentStatus?.status === "completed"
-                        ? "bg-primary"
-                        : "bg-muted-foreground"
-                    }`}
-                  />
-                  {agentStatus?.status === "running"
-                    ? "Running"
-                    : agentStatus?.status === "completed"
-                    ? "Completed"
-                    : "Idle"}
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Scanned Roles</span>
-                  <span className="font-semibold">{agentStatus?.jobs_found || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Auto-Applied</span>
-                  <span className="font-semibold">{agentStatus?.applications_submitted || 0}</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all"
-                    style={{
-                      width: `${Math.min(
-                        ((agentStatus?.applications_submitted || 0) / 25) * 100,
-                        100
-                      )}%`,
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="hero"
-                  size="sm"
-                  className="flex-1 text-xs gap-1.5"
-                  onClick={handleStartSearch}
-                >
-                  <Briefcase className="w-3.5 h-3.5" />
-                  <span>Explore Jobs</span>
-                </Button>
-                {agentStatus?.status === "running" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs"
-                    onClick={async () => {
-                      try {
-                        await fetch(`${API_BASE_URL}/api/agent/pause`, { method: "POST" });
-                        toast({ title: "Agent paused" });
-                      } catch {
-                        toast({ title: "Failed to pause agent", variant: "destructive" });
-                      }
-                    }}
-                  >
-                    <Pause className="w-3.5 h-3.5" />
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+          <Button
+            onClick={handleStartSearch}
+            className="w-full bg-[#123B32] hover:bg-[#1C5246] text-[#F7F5EF] text-xs font-semibold h-11 rounded-lg gap-2"
+          >
+            <Briefcase className="w-4 h-4 text-[#FF7058]" />
+            <span>Deploy Search Flow</span>
+          </Button>
+        </div>
       </div>
 
-      {/* Featured Verified Recruiter Jobs Section */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.5 }}
-      >
-        <Card variant="glass" className="border-white/10">
-          <CardHeader className="flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Briefcase className="w-5 h-5 text-primary" />
-                Featured Verified Opportunities
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Direct postings from approved recruiters awaiting qualified candidates
-              </CardDescription>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate("/candidate/jobs")}
-              className="text-xs text-primary hover:text-primary/80 gap-1"
-            >
-              <span>View All Board Jobs</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {loadingJobs ? (
-              <div className="py-12 flex justify-center">
-                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : featuredJobs.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {featuredJobs.map((job) => (
-                  <div
-                    key={job.id}
-                    className="p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-primary/30 transition-all flex flex-col justify-between space-y-3"
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h4 className="text-sm font-semibold line-clamp-1">{job.title}</h4>
-                          <p className="text-xs text-muted-foreground mt-0.5">{job.company_name}</p>
-                        </div>
-                        <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
-                          {job.job_type}
-                        </Badge>
-                      </div>
+      {/* Featured Curated Roles */}
+      <div className="p-6 sm:p-8 rounded-2xl bg-white border border-[#E6E5DC] editorial-shadow">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 mb-6 border-b border-[#E6E5DC] gap-2">
+          <div>
+            <h3 className="font-serif text-2xl font-bold text-[#123B32]">
+              Verified Requisitions
+            </h3>
+            <p className="text-xs text-[#777D74]">
+              Direct postings by verified corporate recruiters seeking candidates
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            onClick={() => navigate("/candidate/jobs")}
+            className="text-xs text-[#FF7058] hover:text-[#FA5D42] font-semibold gap-1 p-0 h-auto"
+          >
+            <span>View All Board Requisitions</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Button>
+        </div>
 
-                      <div className="space-y-1 text-xs text-muted-foreground">
-                        <div className="flex items-center gap-1.5">
-                          <DollarSign className="w-3.5 h-3.5 text-primary" />
-                          <span className="truncate">{job.salary_description}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="w-3.5 h-3.5 text-primary" />
-                          <span className="truncate">{job.location}</span>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                        {job.description}
-                      </p>
+        {loadingJobs ? (
+          <div className="py-12 flex justify-center">
+            <div className="w-6 h-6 border-2 border-[#123B32] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : featuredJobs.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {featuredJobs.map((job) => (
+              <div
+                key={job.id}
+                className="p-5 rounded-xl bg-[#F7F5EF] border border-[#E6E5DC] hover:border-[#123B32]/40 transition-all flex flex-col justify-between"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h4 className="font-serif text-base font-bold text-[#123B32] line-clamp-1">
+                        {job.title}
+                      </h4>
+                      <p className="text-xs text-[#777D74]">{job.company_name}</p>
                     </div>
-
-                    <Button
-                      variant="hero"
-                      size="sm"
-                      onClick={() => navigate("/candidate/jobs")}
-                      className="w-full text-xs gap-1.5 mt-2"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>View Roles & Apply</span>
-                      <ArrowRight className="w-3.5 h-3.5 ml-auto" />
-                    </Button>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white text-[#123B32] border border-[#E6E5DC] shrink-0">
+                      {job.job_type}
+                    </span>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="py-8 text-center text-muted-foreground space-y-2">
-                <Briefcase className="w-10 h-10 mx-auto opacity-40" />
-                <p className="text-xs">No active verified jobs found yet.</p>
+
+                  <div className="text-xs text-[#777D74] space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <DollarSign className="w-3.5 h-3.5 text-[#123B32]" />
+                      <span>{job.salary_description}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-[#123B32]" />
+                      <span>{job.location}</span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-[#777D74] line-clamp-2 leading-relaxed font-sans">
+                    {getCleanJobDescriptionPreview(job.description, 160)}
+                  </p>
+                </div>
+
                 <Button
-                  variant="outline"
-                  size="sm"
                   onClick={() => navigate("/candidate/jobs")}
-                  className="text-xs"
+                  className="w-full bg-[#123B32] hover:bg-[#1C5246] text-[#F7F5EF] text-xs font-semibold h-10 rounded-lg gap-2 mt-4"
                 >
-                  Open Job Board
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Inspect & Apply</span>
                 </Button>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
+            ))}
+          </div>
+        ) : (
+          <div className="py-8 text-center text-[#777D74] space-y-2">
+            <Briefcase className="w-8 h-8 mx-auto text-[#A9BBA7]" />
+            <p className="text-xs">No active verified postings found at this moment.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

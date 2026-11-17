@@ -6,19 +6,61 @@ import os
 from pathlib import Path
 from typing import List, Optional, Any, Set
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+try:
+    from pydantic import ConfigDict
+except ImportError:
+    ConfigDict = None
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:
+    try:
+        from pydantic import BaseSettings  # type: ignore[assignment]
+    except ImportError:
+        from pydantic import BaseModel
+        class BaseSettings(BaseModel):  # type: ignore[no-redef]
+            def __init__(self, **data):
+                values = {}
+                fields = getattr(self.__class__, "model_fields", {})
+                for fname in fields:
+                    if fname in data:
+                        values[fname] = data[fname]
+                    elif fname in os.environ:
+                        val = os.environ[fname]
+                        field_info = fields[fname]
+                        annotation = getattr(field_info, "annotation", str)
+                        if annotation is bool or getattr(annotation, "__name__", "") == "bool":
+                            values[fname] = val.lower() in ("true", "1", "yes")
+                        elif annotation is int or getattr(annotation, "__name__", "") == "int":
+                            try:
+                                values[fname] = int(val)
+                            except ValueError:
+                                values[fname] = val
+                        else:
+                            values[fname] = val
+                super().__init__(**values)
 
 # Resolve .env from backend directory and project root (backend/.env has higher priority)
 _backend_env = Path(__file__).resolve().parent / ".env"
 _root_env = Path(__file__).resolve().parent.parent / ".env"
-_ENV_FILES = [str(p) for p in [_backend_env, _root_env] if p.exists()]
+_backend_local = Path(__file__).resolve().parent / ".env.local"
+_root_local = Path(__file__).resolve().parent.parent / ".env.local"
+_ENV_FILES = [str(p) for p in [_root_env, _root_local, _backend_env, _backend_local] if p.exists()]
+
+try:
+    from dotenv import load_dotenv
+    for _ef in _ENV_FILES:
+        load_dotenv(_ef, override=True)
+except ImportError:
+    pass
 
 # In cloud deployments (Render, Fly.io, etc.), if no .env file exists and SECRET_KEY is not set in environment,
 # pre-populate os.environ with a cryptographically secure 256-bit ephemeral key so the server can boot and
 # pass health checks immediately even before the user sets secrets in the dashboard.
-if not os.environ.get("SECRET_KEY") and not _ENV_FILES:
+if not os.environ.get("SECRET_KEY"):
     # Use stable persistent key fallback so server restarts on Render don't invalidate existing sessions
     _default_key = "f9Rbhzy7drngVzumB4-4or6Pmu0USjktFkFO4NlIeBLMZBba_5UF7gwO0iZmwRFQ"
+    if os.environ.get("APP_ENV", "").lower() == "production":
+        raise RuntimeError("In production environment (APP_ENV=production), a custom SECRET_KEY must be provided via environment variables.")
     os.environ["SECRET_KEY"] = _default_key
     print("[INFO] SECRET_KEY not found in environment or .env. Using persistent platform secret key.")
 
@@ -237,12 +279,14 @@ class Settings(BaseSettings):
     LOG_ROTATION: str = "10 MB"
     LOG_RETENTION: str = "30 days"
     
-    class Config:
-        env_file = _ENV_FILES
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-        # Ignore extra environment variables that are not declared on the model
-        extra = "ignore"
+    if ConfigDict is not None:
+        model_config = ConfigDict(extra="ignore", case_sensitive=True)
+    else:
+        class Config:
+            env_file = _ENV_FILES
+            env_file_encoding = "utf-8"
+            case_sensitive = True
+            extra = "ignore"
 
 
 # Global settings instance
@@ -250,7 +294,11 @@ try:
     settings = Settings()  # type: ignore[call-arg]
 except Exception as e:
     # If environment parsing/validation fails, ensure SECRET_KEY is strictly checked
-    _secret_key = validate_secret_key_value(os.environ.get("SECRET_KEY", ""))
+    _raw_key = os.environ.get("SECRET_KEY", "")
+    if not _raw_key:
+        _raw_key = "f9Rbhzy7drngVzumB4-4or6Pmu0USjktFkFO4NlIeBLMZBba_5UF7gwO0iZmwRFQ"
+        os.environ["SECRET_KEY"] = _raw_key
+    _secret_key = validate_secret_key_value(_raw_key)
     print("Warning: Settings validation failed, falling back to minimal defaults:", e)
 
     settings = Settings.model_construct(  # type: ignore[call-arg]
@@ -269,6 +317,7 @@ except Exception as e:
         MONGODB_URI=os.environ.get("MONGODB_URI", ""),
         MONGODB_DB_NAME=os.environ.get("MONGODB_DB_NAME", "autoagenthire"),
         OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", ""),
+        GOOGLE_CLIENT_ID=os.environ.get("GOOGLE_CLIENT_ID") or os.environ.get("VITE_GOOGLE_CLIENT_ID", ""),
         CORS_ORIGINS=os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://localhost:8501,https://auto-agent-hire.vercel.app,https://autoagenthire.vercel.app,https://autoagenthire.onrender.com"),
         ALLOWED_RESUME_EXTENSIONS=os.environ.get("ALLOWED_RESUME_EXTENSIONS", "pdf,docx,txt"),
     )

@@ -1,16 +1,16 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Bot, Menu, X, LayoutDashboard, Briefcase, ShieldCheck, LogOut } from "lucide-react";
+import { Sparkles, Menu, X, LayoutDashboard, Briefcase, ShieldCheck, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { authService } from "@/services/authService";
 
 const navLinks = [
-  { name: "Home", href: "/" },
-  { name: "Browse Jobs", href: "/candidate/jobs" },
-  { name: "Recruiter Registration", href: "/recruiter/register" },
+  { name: "Overview", href: "/" },
+  { name: "Explore Roles", href: "/candidate/jobs" },
   { name: "Features", href: "/#features" },
   { name: "How It Works", href: "/#how-it-works" },
+  { name: "For Recruiters", href: "/recruiter/register" },
 ];
 
 export const Header = () => {
@@ -59,98 +59,127 @@ export const Header = () => {
   const PortalIcon = portal.icon;
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50">
-      <div className="bg-background/80 backdrop-blur-xl border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center group-hover:shadow-lg group-hover:shadow-primary/30 transition-all">
-              <Bot className="w-6 h-6 text-primary-foreground" />
+    <header className="fixed top-0 left-0 right-0 z-50 transition-all duration-200">
+      <div className="bg-[#F7F5EF]/95 backdrop-blur-md border-b border-[#E6E5DC]">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+          {/* Logo with Neo Editorial Branding */}
+          <Link to="/" className="flex items-center gap-3 group">
+            <div className="w-10 h-10 rounded-lg bg-[#123B32] text-[#F7F5EF] flex items-center justify-center transition-transform group-hover:scale-105 shadow-sm">
+              <Sparkles className="w-5 h-5 text-[#FF7058]" />
             </div>
-            <span className="text-xl font-bold">AutoAgentHire</span>
+            <div className="flex flex-col">
+              <span className="font-serif text-2xl tracking-tight text-[#123B32] leading-none font-bold">
+                AutoAgentHire
+              </span>
+              <span className="text-[10px] tracking-widest uppercase font-medium text-[#777D74] mt-0.5">
+                Editorial AI Intelligence
+              </span>
+            </div>
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-8">
-            {navLinks.map((link) => (
-              <Link
-                key={link.name}
-                to={link.href}
-                className={`text-sm font-medium transition-colors hover:text-primary ${
-                  location.pathname === link.href ? "text-primary" : "text-muted-foreground"
-                }`}
-              >
-                {link.name}
-              </Link>
-            ))}
+          <nav className="hidden lg:flex items-center gap-8">
+            {navLinks.map((link) => {
+              const isActive = location.pathname === link.href;
+              return (
+                <Link
+                  key={link.name}
+                  to={link.href}
+                  className={`text-xs uppercase tracking-wider font-semibold transition-colors duration-200 ${
+                    isActive
+                      ? "text-[#123B32] border-b-2 border-[#FF7058] pb-1"
+                      : "text-[#777D74] hover:text-[#123B32]"
+                  }`}
+                >
+                  {link.name}
+                </Link>
+              );
+            })}
           </nav>
 
-          {/* Desktop CTA */}
-          <div className="hidden md:flex items-center gap-3">
+          {/* Desktop Actions */}
+          <div className="hidden lg:flex items-center gap-3">
             {authToken ? (
               <>
-                <Button variant="default" asChild className="gap-2">
+                <Button
+                  variant="default"
+                  asChild
+                  className="bg-[#123B32] hover:bg-[#1C5246] text-[#F7F5EF] text-xs font-semibold px-4 py-2 gap-2 shadow-sm"
+                >
                   <Link to={portal.href}>
-                    <PortalIcon className="w-4 h-4" />
+                    <PortalIcon className="w-4 h-4 text-[#FF7058]" />
                     <span>{portal.label}</span>
                   </Link>
                 </Button>
-                <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-destructive gap-1.5">
-                  <LogOut className="w-4 h-4" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleLogout}
+                  className="text-xs text-[#777D74] hover:text-[#202722] hover:bg-stone-200/50 gap-1.5"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
                   <span>Sign Out</span>
                 </Button>
               </>
             ) : (
               <>
-                <Button variant="ghost" asChild>
-                  <Link to="/login">Login</Link>
+                <Button
+                  variant="ghost"
+                  asChild
+                  className="text-xs font-semibold text-[#123B32] hover:bg-stone-200/60"
+                >
+                  <Link to="/login">Sign In</Link>
                 </Button>
-                <Button variant="default" asChild>
-                  <Link to="/signup">Sign Up</Link>
+                <Button
+                  asChild
+                  className="bg-[#FF7058] hover:bg-[#FA5D42] text-white text-xs font-semibold px-5 py-2.5 shadow-sm shadow-[#FF7058]/25"
+                >
+                  <Link to="/signup">Begin Advantage</Link>
                 </Button>
               </>
             )}
           </div>
 
-          {/* Mobile menu button */}
+          {/* Mobile menu trigger */}
           <button
-            className="md:hidden p-2 text-foreground"
+            className="lg:hidden p-2 text-[#123B32] hover:bg-stone-200/50 rounded-lg transition-colors"
             onClick={() => setIsOpen(!isOpen)}
+            aria-label="Toggle Navigation Menu"
           >
             {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
         </div>
       </div>
 
-      {/* Mobile menu */}
+      {/* Mobile drawer */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="md:hidden bg-background/95 backdrop-blur-xl border-b border-white/5"
+            className="lg:hidden bg-[#F7F5EF] border-b border-[#E6E5DC] shadow-lg"
           >
-            <nav className="flex flex-col p-4 gap-2">
+            <nav className="flex flex-col p-6 gap-3">
               {navLinks.map((link) => (
                 <Link
                   key={link.name}
                   to={link.href}
                   onClick={() => setIsOpen(false)}
-                  className="px-4 py-3 rounded-lg text-foreground hover:bg-primary/10 transition-colors"
+                  className="px-3 py-2 text-sm font-semibold text-[#202722] hover:text-[#123B32] hover:bg-stone-200/40 rounded-lg transition-colors"
                 >
                   {link.name}
                 </Link>
               ))}
-              <hr className="border-white/10 my-2" />
+              <div className="border-t border-[#E6E5DC] my-2 pt-3" />
               {authToken ? (
                 <>
                   <Link
                     to={portal.href}
                     onClick={() => setIsOpen(false)}
-                    className="px-4 py-3 rounded-lg text-primary font-semibold hover:bg-primary/10 transition-colors flex items-center gap-2"
+                    className="px-4 py-3 rounded-lg bg-[#123B32] text-[#F7F5EF] font-semibold text-sm flex items-center gap-2"
                   >
-                    <PortalIcon className="w-4 h-4" />
+                    <PortalIcon className="w-4 h-4 text-[#FF7058]" />
                     <span>{portal.label}</span>
                   </Link>
                   <button
@@ -158,27 +187,29 @@ export const Header = () => {
                       setIsOpen(false);
                       handleLogout();
                     }}
-                    className="px-4 py-3 rounded-lg text-destructive hover:bg-destructive/10 transition-colors text-left flex items-center gap-2"
+                    className="px-4 py-2.5 rounded-lg text-sm text-[#777D74] hover:text-red-600 transition-colors text-left flex items-center gap-2"
                   >
                     <LogOut className="w-4 h-4" />
                     <span>Sign Out</span>
                   </button>
                 </>
               ) : (
-                <>
+                <div className="flex flex-col gap-2 pt-1">
                   <Link
                     to="/login"
                     onClick={() => setIsOpen(false)}
-                    className="px-4 py-3 rounded-lg text-foreground hover:bg-primary/10 transition-colors"
+                    className="px-4 py-2.5 rounded-lg text-center text-sm font-semibold border border-[#E6E5DC] bg-white text-[#123B32]"
                   >
-                    Login
+                    Sign In
                   </Link>
-                  <Button variant="hero" className="mt-2" asChild>
-                    <Link to="/signup" onClick={() => setIsOpen(false)}>
-                      Sign Up
-                    </Link>
-                  </Button>
-                </>
+                  <Link
+                    to="/signup"
+                    onClick={() => setIsOpen(false)}
+                    className="px-4 py-2.5 rounded-lg text-center text-sm font-semibold bg-[#FF7058] text-white"
+                  >
+                    Begin Advantage
+                  </Link>
+                </div>
               )}
             </nav>
           </motion.div>

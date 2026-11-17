@@ -40,14 +40,24 @@ if not _echo:
 def _make_engine(url: str):
     """Create a SQLAlchemy engine for the given URL."""
     if url.startswith('sqlite'):
-        # StaticPool: all requests share ONE connection - safe for SQLite single-process only.
-        # For multi-process or production, switch to NullPool + DATABASE_URL=postgresql://...
-        return create_engine(
+        is_memory = ':memory:' in url
+        eng = create_engine(
             url,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
+            connect_args={"check_same_thread": False, "timeout": 30},
+            poolclass=StaticPool if is_memory else NullPool,
             echo=_echo,
         )
+        @event.listens_for(eng, "connect")
+        def _set_sqlite_pragma(dbapi_connection, connection_record):
+            try:
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA busy_timeout=5000")
+                cursor.close()
+            except Exception:
+                pass
+        return eng
     # Strip asyncpg prefix — we always use psycopg2 for sync connections
     sync_url = url.replace('postgresql+asyncpg://', 'postgresql://', 1)
     # PostgreSQL connection
@@ -117,6 +127,18 @@ _COLUMN_MIGRATIONS = [
     ("users", "job_role",         "VARCHAR(255)"),
     ("users", "bio",              "TEXT"),
     ("job_postings", "skills",    "TEXT"),
+    ("job_candidate_applications", "reference_id",           "VARCHAR(100)"),
+    ("job_candidate_applications", "job_type",               "VARCHAR(50) DEFAULT 'recruiter'"),
+    ("job_candidate_applications", "imported_job_id",        "INTEGER"),
+    ("job_candidate_applications", "company_name",           "VARCHAR(255)"),
+    ("job_candidate_applications", "job_title",              "VARCHAR(255)"),
+    ("job_candidate_applications", "job_location",           "VARCHAR(255)"),
+    ("job_candidate_applications", "submission_channel",      "VARCHAR(100) DEFAULT 'autoagenthire_portal'"),
+    ("job_candidate_applications", "consent_timestamp",       "TIMESTAMP"),
+    ("job_candidate_applications", "delivery_status",         "VARCHAR(100) DEFAULT 'Delivered to Employer'"),
+    ("job_candidate_applications", "delivery_channel",        "VARCHAR(100)"),
+    ("job_candidate_applications", "delivery_details",        "TEXT"),
+    ("job_candidate_applications", "withdrawn_at",            "TIMESTAMP"),
     ("job_candidate_applications", "interview_scheduled_at", "TIMESTAMP"),
     ("job_candidate_applications", "interview_meeting_link", "VARCHAR(512)"),
     ("job_candidate_applications", "interview_round",        "VARCHAR(100)"),
@@ -177,6 +199,32 @@ def init_db():
         _run_migrations()
     except Exception as e:
         print("[DB] WARNING - Migration error: " + str(e))
+
+    # Verify job_candidate_applications column constraints & unescape job descriptions
+    try:
+        import html
+        with engine.begin() as conn:
+            is_sqlite = DATABASE_URL.startswith("sqlite")
+            if is_sqlite:
+                table_info = conn.execute(text("PRAGMA table_info(job_candidate_applications)")).fetchall()
+                jp_col = next((r for r in table_info if r[1] == "job_posting_id"), None)
+                if jp_col and jp_col[3] == 1:  # notnull is True
+                    # If empty, safely recreate table so job_posting_id is nullable for imported jobs
+                    cnt = conn.execute(text("SELECT COUNT(*) FROM job_candidate_applications")).scalar()
+                    if cnt == 0:
+                        conn.execute(text("DROP TABLE job_candidate_applications"))
+                        JobApplication.__table__.create(bind=conn)
+                        print("[DB] Migration: Re-created job_candidate_applications with nullable job_posting_id")
+
+            # Unescape any entity-encoded job descriptions
+            desc_rows = conn.execute(text("SELECT id, description FROM imported_job_listings WHERE description LIKE '%&lt;%' OR description LIKE '%&amp;%'")).fetchall()
+            for r_id, r_desc in desc_rows:
+                if r_desc:
+                    conn.execute(text("UPDATE imported_job_listings SET description = :desc WHERE id = :id"), {"desc": html.unescape(r_desc), "id": r_id})
+            if desc_rows:
+                print(f"[DB] Migration: Unescaped {len(desc_rows)} job descriptions in imported_job_listings")
+    except Exception as m_err:
+        print(f"[DB] Post-init migration notice: {m_err}")
 
     # Seed system Authorizer account if not present
     try:

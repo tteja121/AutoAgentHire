@@ -145,15 +145,13 @@ class MongoDBManager:
         start_time = time.time()
         try:
             if not self._client or not self._connected:
-                connected = self.connect()
-                if not connected or self._client is None:
-                    return {
-                        "status": "disconnected",
-                        "database": self.db_name,
-                        "latency_ms": None,
-                        "collections": [],
-                        "error": self._last_error or "MongoDB Atlas unreachable",
-                    }
+                return {
+                    "status": "disconnected",
+                    "database": self.db_name,
+                    "latency_ms": None,
+                    "collections": [],
+                    "error": self._last_error or "MongoDB Atlas unreachable",
+                }
             self._client.admin.command('ping')
             latency_ms = round((time.time() - start_time) * 1000, 2)
             colls = self._db.list_collection_names() if self._db is not None else []

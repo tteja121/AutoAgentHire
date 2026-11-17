@@ -1,84 +1,116 @@
 import { motion } from "framer-motion";
-import { Upload, Search, Rocket, ArrowRight } from "lucide-react";
+import { FileUp, Cpu, SendHorizontal, ArrowRight } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 
 const steps = [
   {
-    icon: <Upload className="w-8 h-8" />,
     step: "01",
-    title: "Upload Resume & Set Preferences",
-    description: "Upload your resume and tell us what you're looking for. Our AI will extract your skills and experience.",
+    icon: FileUp,
+    title: "Ingestion & ATS Calibration",
+    description: "Upload your resume in PDF format. Our neural parser extracts competencies, evaluates ATS readability, and identifies critical keyword opportunities.",
+    detail: "Average calibration time: 14 seconds",
   },
   {
-    icon: <Search className="w-8 h-8" />,
     step: "02",
-    title: "AI Finds & Matches Jobs",
-    description: "Our intelligent algorithms scan thousands of job listings to find perfect matches for your profile.",
+    icon: Cpu,
+    title: "Multi-Vector Role Matching",
+    description: "The engine screens verified requisitions against your seniority, tech stack, and salary goals, computing a match confidence index for each position.",
+    detail: "500+ corporate positions parsed daily",
   },
   {
-    icon: <Rocket className="w-8 h-8" />,
     step: "03",
-    title: "Auto-Apply & Track Progress",
-    description: "Sit back while we apply to jobs automatically. Track everything from your personalized dashboard.",
+    icon: SendHorizontal,
+    title: "Autonomous Delivery & Tracking",
+    description: "Tailored applications are generated and dispatched with custom cover letters directly to verified recruiters, with complete audit logs in your dashboard.",
+    detail: "Instant confirmation & review telemetry",
   },
 ];
 
 export const HowItWorksSection = () => {
   return (
-    <section className="py-24 px-4 relative">
-      <div className="max-w-7xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          viewport={{ once: true }}
-          className="text-center mb-16"
-        >
-          <h2 className="text-4xl md:text-5xl font-bold mb-6">
-            Get Started in <span className="gradient-text">3 Simple Steps</span>
-          </h2>
-          <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-            From signup to your first automated application in minutes.
+    <section className="py-24 px-6 lg:px-8 bg-[#123B32] text-[#F7F5EF] relative overflow-hidden">
+      {/* Decorative Editorial Watermark */}
+      <div className="absolute left-[-2%] top-[10%] text-[120px] font-serif text-white/[0.03] select-none pointer-events-none leading-none">
+        Protocol
+      </div>
+
+      <div className="max-w-7xl mx-auto relative z-10">
+        {/* Section Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-20 pb-8 border-b border-white/10">
+          <div className="max-w-2xl">
+            <span className="text-xs uppercase tracking-widest text-[#FF7058] font-bold block mb-3">
+              Operational Sequence
+            </span>
+            <h2 className="font-serif text-3xl sm:text-5xl text-[#F7F5EF] font-normal tracking-tight leading-tight">
+              From Upload to Interview in Three Strategic Steps.
+            </h2>
+          </div>
+          <p className="mt-4 md:mt-0 text-sm text-[#A9BBA7] max-w-xs leading-relaxed">
+            Eliminate hours of manual form-filling with an autonomous pipeline engineered for maximum callback conversion.
           </p>
-        </motion.div>
+        </div>
 
-        <div className="relative">
-          {/* Connection line */}
-          <div className="hidden lg:block absolute top-1/2 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-primary/30 to-transparent -translate-y-1/2" />
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-4">
-            {steps.map((step, index) => (
+        {/* Step Columns */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {steps.map((item, idx) => {
+            const Icon = item.icon;
+            return (
               <motion.div
-                key={step.step}
-                initial={{ opacity: 0, y: 40 }}
+                key={item.step}
+                initial={{ opacity: 0, y: 30 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: index * 0.2 }}
+                transition={{ duration: 0.6, delay: idx * 0.15 }}
                 viewport={{ once: true }}
-                className="relative"
+                className="relative p-8 rounded-xl bg-white/[0.04] border border-white/10 hover:border-[#FF7058]/50 transition-all duration-300 flex flex-col justify-between"
               >
-                <div className="relative z-10 p-8 rounded-2xl bg-card/60 backdrop-blur-xl border border-white/10 hover:border-primary/30 transition-all duration-300 group hover:-translate-y-2 hover:shadow-xl">
-                  {/* Step number */}
-                  <div className="absolute -top-4 left-8 px-4 py-1 bg-primary text-primary-foreground text-sm font-bold rounded-full">
-                    Step {step.step}
-                  </div>
-
-                  {/* Icon */}
-                  <div className="w-16 h-16 rounded-2xl bg-primary/20 flex items-center justify-center mb-6 group-hover:bg-primary/30 transition-colors group-hover:scale-110 duration-300">
-                    <div className="text-primary">{step.icon}</div>
-                  </div>
-
-                  <h3 className="text-xl font-semibold mb-3 text-foreground">{step.title}</h3>
-                  <p className="text-muted-foreground leading-relaxed">{step.description}</p>
-
-                  {/* Arrow for desktop */}
-                  {index < steps.length - 1 && (
-                    <div className="hidden lg:flex absolute -right-6 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full bg-card border border-primary/30 items-center justify-center text-primary">
-                      <ArrowRight className="w-5 h-5" />
+                <div>
+                  {/* Step Number & Icon */}
+                  <div className="flex items-center justify-between mb-8">
+                    <span className="font-serif text-3xl font-bold text-[#FF7058]">
+                      {item.step}
+                    </span>
+                    <div className="w-12 h-12 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-[#A9BBA7]">
+                      <Icon className="w-6 h-6" />
                     </div>
-                  )}
+                  </div>
+
+                  <h3 className="font-serif text-2xl font-bold text-[#F7F5EF] mb-3 leading-snug">
+                    {item.title}
+                  </h3>
+
+                  <p className="text-xs sm:text-sm text-[#A9BBA7] leading-relaxed mb-6 font-sans">
+                    {item.description}
+                  </p>
+                </div>
+
+                <div className="pt-4 border-t border-white/10 flex items-center justify-between text-xs text-[#E6E5DC]/80 font-mono">
+                  <span>{item.detail}</span>
                 </div>
               </motion.div>
-            ))}
+            );
+          })}
+        </div>
+
+        {/* Bottom CTA Banner */}
+        <div className="mt-16 pt-8 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div className="text-left">
+            <h4 className="font-serif text-xl text-white font-bold mb-1">
+              Ready to deploy your personal career agent?
+            </h4>
+            <p className="text-xs text-[#A9BBA7]">
+              Free candidate onboarding includes instant ATS evaluation and 5 free automated submissions.
+            </p>
           </div>
+          <Button
+            asChild
+            className="bg-[#FF7058] hover:bg-[#FA5D42] text-white text-xs font-semibold px-6 py-3 rounded-lg shadow-md shrink-0"
+          >
+            <Link to="/signup" className="flex items-center gap-2">
+              <span>Activate Free Agent</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </Button>
         </div>
       </div>
     </section>

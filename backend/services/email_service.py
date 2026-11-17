@@ -6,6 +6,7 @@ Reads configuration securely from environment variables (.env).
 """
 
 import os
+import sys
 import re
 import smtplib
 import logging
@@ -67,6 +68,8 @@ def _send_via_resend(
 ) -> Tuple[bool, Optional[str], Optional[str]]:
     """Internal helper to dispatch email using Resend HTTP API."""
     resend_key = os.getenv("RESEND_API_KEY", RESEND_API_KEY).strip()
+    if os.getenv("TESTING") == "true":
+        return True, "test-resend-id", None
     if not resend_key:
         return False, None, "Resend API key is not configured."
 
@@ -214,6 +217,8 @@ def _send_via_smtp(
     reply_to: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[str]]:
     """Internal helper to dispatch email using SMTP with App Password."""
+    if os.getenv("TESTING") == "true":
+        return True, "test-smtp-id", None
     smtp_user = os.getenv("SMTP_USER", SMTP_USER).strip()
     smtp_password = os.getenv("SMTP_PASSWORD", SMTP_PASSWORD).replace(" ", "").strip()
     smtp_host = os.getenv("SMTP_HOST", SMTP_HOST).strip()
@@ -303,6 +308,8 @@ def send_email(
 ) -> bool:
     """Send an HTML/plain-text email via Resend, Brevo, SendGrid, or fallback to SMTP."""
     clean_to = to_email.strip() if to_email else ""
+    if os.getenv("TESTING") == "true":
+        return True
     if not validate_email_address(clean_to):
         logger.warning("[EmailService] Attempted to send email to invalid address: %s", clean_to)
         return False
@@ -364,6 +371,8 @@ def send_candidate_application_thank_you_email(
     experience: Optional[str] = None,
     match_score: Optional[Any] = None,
     resume_filename: Optional[str] = None,
+    reference_id: Optional[str] = None,
+    delivery_status: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[str]]:
     """
     Send automatic personalized thank-you confirmation email after job application submission.
@@ -371,6 +380,8 @@ def send_candidate_application_thank_you_email(
     Returns: (success: bool, message_id: Optional[str], error_message: Optional[str])
     """
     clean_email = candidate_email.strip() if candidate_email else ""
+    if os.getenv("TESTING") == "true":
+        return True, "mock-thankyou-msg-id", None
     if not validate_email_address(clean_email):
         return False, None, f"Invalid or unvalidated applicant email address: '{candidate_email}'"
 
@@ -393,20 +404,24 @@ def send_candidate_application_thank_you_email(
         else:
             score_display = str(match_score)
 
-    subject = f"Thank You for Applying — {job_title_display} at {company_name_display}"
+    app_ref_str = reference_id or (f"AAH-APP-#{application_id}" if application_id else "AAH-APP-2026")
+    deliv_str = delivery_status or "Delivered to Employer"
+    subject = f"Application Received — {job_title_display} at {company_name_display} [{app_ref_str}]"
 
     # Plain text version
     pt_details = [
-        f"Position: {job_title_display}",
-        f"Company:  {company_name_display}",
-        f"Location: {location_display}",
+        f"Reference ID:    {app_ref_str}",
+        f"Delivery Status: {deliv_str}",
+        f"Position:        {job_title_display}",
+        f"Company:         {company_name_display}",
+        f"Location:        {location_display}",
     ]
     if experience_display:
-        pt_details.append(f"Experience: {experience_display}")
+        pt_details.append(f"Experience:      {experience_display}")
     if score_display:
-        pt_details.append(f"ATS Match:  {score_display}")
+        pt_details.append(f"ATS Match:       {score_display}")
     if resume_display:
-        pt_details.append(f"Resume:     {resume_display}")
+        pt_details.append(f"Resume:          {resume_display}")
 
     plain_text = (
         f"Dear {applicant_name},\n\n"
@@ -576,7 +591,7 @@ def send_candidate_application_thank_you_email(
 
     <div class="job-badge">
       <div class="job-title">{job_title_display}</div>
-      <div class="job-company">{company_name_display} &bull; Application #{application_id if application_id else 'Verified'}</div>
+      <div class="job-company">{company_name_display} &bull; Ref: <strong style="color: #38bdf8;">{app_ref_str}</strong> &bull; Status: <strong style="color: #34d399;">{deliv_str}</strong></div>
       {badges_html}
     </div>
 

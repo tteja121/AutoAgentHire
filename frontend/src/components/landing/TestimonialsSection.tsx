@@ -1,87 +1,73 @@
 import { motion } from "framer-motion";
 import { Star, Quote } from "lucide-react";
 
-interface TestimonialCardProps {
-  quote: string;
-  name: string;
-  role: string;
-  rating: number;
-  delay?: number;
-}
-
-const TestimonialCard = ({ quote, name, role, rating, delay = 0 }: TestimonialCardProps) => (
-  <motion.div
-    initial={{ opacity: 0, y: 30 }}
-    whileInView={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.5, delay }}
-    viewport={{ once: true }}
-    className="relative p-8 rounded-2xl bg-card/60 backdrop-blur-xl border border-white/10 hover:border-primary/30 transition-all duration-300"
-  >
-    <Quote className="absolute top-6 right-6 w-8 h-8 text-primary/20" />
-    
-    <div className="flex gap-1 mb-4">
-      {Array.from({ length: rating }).map((_, i) => (
-        <Star key={i} className="w-5 h-5 fill-warning text-warning" />
-      ))}
-    </div>
-
-    <p className="text-foreground/90 leading-relaxed mb-6 italic">"{quote}"</p>
-
-    <div className="flex items-center gap-4">
-      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center text-primary-foreground font-semibold">
-        {name.charAt(0)}
-      </div>
-      <div>
-        <div className="font-semibold text-foreground">{name}</div>
-        <div className="text-sm text-muted-foreground">{role}</div>
-      </div>
-    </div>
-  </motion.div>
-);
-
 const testimonials = [
   {
-    quote: "AutoAgentHire completely changed my job search. I landed 3 interviews in the first week without lifting a finger!",
-    name: "Sarah Chen",
-    role: "Software Engineer",
-    rating: 5,
+    quote: "The ATS calibration identified two critical keyword voids in my distributed systems experience. Within four days of deploying the agent, I received two interview requests from Tier-1 engineering teams.",
+    name: "Elena Rostova",
+    role: "Staff Infrastructure Engineer",
+    company: "Series B Cloud Infrastructure",
   },
   {
-    quote: "The AI cover letters are incredible. They're personalized and professional - way better than what I could write myself.",
-    name: "Marcus Johnson",
-    role: "Product Manager",
-    rating: 5,
+    quote: "Most job automation tools blast generic resumes and get you blacklisted. AutoAgentHire does the opposite: it generates bespoke, highly context-aware cover letters that hiring managers actually compliment.",
+    name: "Marcus Vance",
+    role: "Principal Product Architect",
+    company: "Enterprise AI Platform",
   },
   {
-    quote: "I was skeptical at first, but this tool saved me hours every day. The automated applications are a game-changer.",
-    name: "Emily Rodriguez",
-    role: "Data Analyst",
-    rating: 5,
+    quote: "As a recruiter, the difference between applicants from AutoAgentHire and raw inbound is night and day. The match scores are accurate and candidate summaries highlight exact technical competencies.",
+    name: "Claire D'Souza",
+    role: "Head of Talent Acquisition",
+    company: "FinTech Scale-up",
   },
 ];
 
 export const TestimonialsSection = () => {
   return (
-    <section className="py-24 px-4 relative">
-      <div className="max-w-6xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          viewport={{ once: true }}
-          className="text-center mb-16"
-        >
-          <h2 className="text-4xl md:text-5xl font-bold mb-6">
-            What Our <span className="gradient-text">Users Say</span>
+    <section className="py-24 px-6 lg:px-8 bg-[#F7F5EF] relative border-t border-[#E6E5DC]">
+      <div className="max-w-7xl mx-auto">
+        <div className="text-center max-w-2xl mx-auto mb-16">
+          <span className="text-xs uppercase tracking-widest text-[#FF7058] font-bold block mb-3">
+            Editorial Perspectives
+          </span>
+          <h2 className="font-serif text-3xl sm:text-5xl text-[#123B32] font-normal tracking-tight leading-tight mb-4">
+            Proven Conversions in High-Signal Hiring.
           </h2>
-          <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-            Join thousands of job seekers who've transformed their career search.
+          <p className="text-sm text-[#777D74] leading-relaxed">
+            Engineers, executives, and talent partners who transformed their pipeline through autonomous intelligence.
           </p>
-        </motion.div>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {testimonials.map((testimonial, index) => (
-            <TestimonialCard key={testimonial.name} {...testimonial} delay={index * 0.1} />
+          {testimonials.map((item, idx) => (
+            <motion.div
+              key={item.name}
+              initial={{ opacity: 0, y: 25 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: idx * 0.1 }}
+              viewport={{ once: true }}
+              className="p-8 rounded-xl bg-white border border-[#E6E5DC] editorial-shadow editorial-card-hover flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-center gap-1 mb-5">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} className="w-4 h-4 fill-[#FF7058] text-[#FF7058]" />
+                  ))}
+                </div>
+
+                <Quote className="w-8 h-8 text-[#A9BBA7]/40 mb-3" />
+
+                <p className="font-serif text-base text-[#202722] leading-relaxed mb-6 italic">
+                  "{item.quote}"
+                </p>
+              </div>
+
+              <div className="pt-4 border-t border-[#E6E5DC]">
+                <h4 className="font-serif text-sm font-bold text-[#123B32]">{item.name}</h4>
+                <div className="text-xs text-[#777D74]">{item.role}</div>
+                <div className="text-[11px] text-[#A9BBA7] font-medium">{item.company}</div>
+              </div>
+            </motion.div>
           ))}
         </div>
       </div>

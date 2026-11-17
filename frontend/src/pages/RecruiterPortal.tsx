@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Briefcase, Send, Users, Clock, DollarSign, Calendar, MapPin, Building2,
   FileText, ExternalLink, CheckCircle2, AlertCircle, Plus, Eye, Search,
@@ -102,9 +102,45 @@ export default function RecruiterPortal() {
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // Active section: 'dashboard' | 'post' | 'tracking' | 'settings'
-  const [activeTab, setActiveTab] = useState<"dashboard" | "post" | "tracking" | "settings">("dashboard");
-  const [trackingSubTab, setTrackingSubTab] = useState<"jobs" | "applications">("jobs");
+  const validTabs = ["dashboard", "post", "tracking", "settings"] as const;
+  type RecruiterTab = typeof validTabs[number];
+
+  const urlTab = searchParams.get("tab") as RecruiterTab;
+  const initialActiveTab: RecruiterTab = validTabs.includes(urlTab) ? urlTab : "dashboard";
+  const [activeTab, setActiveTabState] = useState<RecruiterTab>(initialActiveTab);
+
+  const setActiveTab = (tab: RecruiterTab) => {
+    setActiveTabState(tab);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (tab === "dashboard") {
+        next.delete("tab");
+      } else {
+        next.set("tab", tab);
+      }
+      return next;
+    }, { replace: true });
+  };
+
+  const urlSubTab = searchParams.get("subtab");
+  const initialSubTab = urlSubTab === "applications" ? "applications" : "jobs";
+  const [trackingSubTab, setTrackingSubTabState] = useState<"jobs" | "applications">(initialSubTab);
+
+  const setTrackingSubTab = (sub: "jobs" | "applications") => {
+    setTrackingSubTabState(sub);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (sub === "jobs") {
+        next.delete("subtab");
+      } else {
+        next.set("subtab", sub);
+      }
+      return next;
+    }, { replace: true });
+  };
 
   // Recruiter Password Change State
   const [oldPassword, setOldPassword] = useState("");
@@ -912,34 +948,34 @@ export default function RecruiterPortal() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col md:flex-row">
-      {/* Horizontal Sidebar Navigation */}
-      <aside className="w-full md:w-64 lg:w-72 border-r border-white/10 bg-card/60 backdrop-blur-xl flex flex-col shrink-0 sticky top-0 md:h-screen z-30">
+    <div className="min-h-screen bg-[#F7F5EF] text-[#202722] flex flex-col md:flex-row">
+      {/* Deep Forest Green Editorial Sidebar Navigation */}
+      <aside className="w-full md:w-64 lg:w-72 border-r border-[#123B32]/30 bg-[#123B32] text-[#F7F5EF] flex flex-col shrink-0 sticky top-0 md:h-screen z-30">
         {/* Brand Header */}
-        <div className="h-16 border-b border-white/10 px-6 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-blue-500 flex items-center justify-center font-bold text-white shadow-lg shadow-primary/25">
+        <div className="h-20 border-b border-white/10 px-6 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-[#FF7058] text-white flex items-center justify-center font-bold shadow-sm shrink-0">
               <Briefcase className="w-5 h-5" />
             </div>
             <div>
-              <span className="font-bold text-base tracking-tight block">AutoAgentHire</span>
-              <span className="text-[10px] text-primary font-semibold tracking-wider uppercase">Recruiter Workspace</span>
+              <span className="font-serif font-bold text-lg text-white tracking-tight block">AutoAgentHire</span>
+              <span className="text-[10px] text-[#A9BBA7] font-semibold tracking-wider uppercase">Recruiter Workspace</span>
             </div>
           </Link>
         </div>
 
         {/* Sidebar Navigation Items */}
         <div className="p-4 space-y-1.5 flex-1">
-          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 mb-2">
+          <div className="text-[10px] font-semibold text-[#A9BBA7] uppercase tracking-wider px-3 mb-2">
             Navigation Menu
           </div>
 
           <button
             onClick={() => setActiveTab("dashboard")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all ${
               activeTab === "dashboard"
-                ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 font-semibold"
-                : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+                ? "bg-white/10 text-white border-l-2 border-[#FF7058] shadow-xs"
+                : "text-[#A9BBA7] hover:text-white hover:bg-white/5"
             }`}
           >
             <LayoutDashboard className="w-4 h-4" />
@@ -948,10 +984,10 @@ export default function RecruiterPortal() {
 
           <button
             onClick={() => setActiveTab("post")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all ${
               activeTab === "post"
-                ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 font-semibold"
-                : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+                ? "bg-white/10 text-white border-l-2 border-[#FF7058] shadow-xs"
+                : "text-[#A9BBA7] hover:text-white hover:bg-white/5"
             }`}
           >
             <Plus className="w-4 h-4" />
@@ -963,16 +999,16 @@ export default function RecruiterPortal() {
               setActiveTab("tracking");
               loadTrackingData();
             }}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all ${
               activeTab === "tracking"
-                ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 font-semibold"
-                : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+                ? "bg-white/10 text-white border-l-2 border-[#FF7058] shadow-xs"
+                : "text-[#A9BBA7] hover:text-white hover:bg-white/5"
             }`}
           >
             <Clock className="w-4 h-4" />
             <span className="flex-1 text-left">Jobs Tracking</span>
             {applicationsList.length > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-white/20 text-white font-bold text-[10px]">
+              <span className="px-2 py-0.5 rounded-full bg-[#FF7058] text-white font-bold text-[10px]">
                 {applicationsList.length}
               </span>
             )}
@@ -980,42 +1016,42 @@ export default function RecruiterPortal() {
 
           <button
             onClick={() => setActiveTab("settings")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all ${
               activeTab === "settings"
-                ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 font-semibold"
-                : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+                ? "bg-white/10 text-white border-l-2 border-[#FF7058] shadow-xs"
+                : "text-[#A9BBA7] hover:text-white hover:bg-white/5"
             }`}
           >
             <Settings className="w-4 h-4" />
             <span className="flex-1 text-left">Profile & Settings</span>
           </button>
 
-          <div className="pt-3 border-t border-white/5">
+          <div className="pt-3 border-t border-white/10">
             <Link
               to="/candidate/jobs"
               target="_blank"
-              className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-medium text-primary hover:bg-primary/10 border border-primary/20 transition-all"
+              className="w-full flex items-center gap-3 px-3.5 py-2 rounded-lg text-xs font-medium text-[#FF7058] hover:bg-white/5 border border-white/10 transition-all"
             >
-              <ExternalLink className="w-4 h-4 text-primary" />
+              <ExternalLink className="w-4 h-4 text-[#FF7058]" />
               <span className="flex-1 text-left">Candidate Job Board</span>
             </Link>
           </div>
         </div>
 
         {/* Recruiter Profile / User ID info & Logout */}
-        <div className="p-4 border-t border-white/10 bg-black/20">
+        <div className="p-4 border-t border-white/10 bg-black/10">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5 min-w-0">
               <img
                 src={currentUser?.company_logo_url || jobForm.company_logo_url || "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop"}
                 alt="Logo"
-                className="w-8 h-8 rounded-lg object-cover bg-card border border-white/10 shrink-0"
+                className="w-8 h-8 rounded-lg object-cover bg-white border border-white/10 shrink-0"
                 onError={(e) => {
                   (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1549923746-c502d488b3ea?w=128&h=128&fit=crop";
                 }}
               />
               <div className="min-w-0">
-                <span className="text-xs font-semibold block text-foreground truncate leading-none">
+                <span className="text-xs font-semibold block text-white truncate leading-none">
                   {currentUser?.company_name || currentUser?.full_name || "Recruiter"}
                 </span>
                 <span className="text-[10px] text-muted-foreground font-mono mt-0.5 block truncate">

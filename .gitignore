@@ -35,6 +35,9 @@ ENV/
 env.bak/
 venv.bak/
 .virtualenv/
+**/.venv/
+**/venv/
+**/env/
 
 # ── IDEs, Editors & OS Files ─────────────────────────────────────────────────
 .vscode/
@@ -58,6 +61,9 @@ Desktop.ini
 *.env
 *.env.*
 *.local
+**/.env
+**/.env.*
+**/.env*.local
 
 # Allow example and template environment files to be committed
 !.env.example
@@ -129,8 +135,14 @@ chroma_db/
 
 # ── Runtime Data & User Uploads ───────────────────────────────────────────────
 data/
+**/data/
 uploads/
+**/uploads/
 backend/uploads/
+*.pdf
+*.docx
+*.doc
+!docs/**/*.pdf
 
 # ── Node.js & React Frontend Build ────────────────────────────────────────────
 node_modules/
