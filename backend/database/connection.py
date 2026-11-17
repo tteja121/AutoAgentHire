@@ -19,10 +19,14 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Import models
-from backend.database.models_complete import Base
+from backend.database.models_complete import Base, User, JobApplication
 
-_SQLITE_FALLBACK = 'sqlite:///./data/autoagenthire.db'
-Path('./data').mkdir(parents=True, exist_ok=True)
+# Absolute path to data directory ensuring all processes and threads target the exact same file
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_DATA_DIR = _PROJECT_ROOT / "data"
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
+_DB_FILE = _DATA_DIR / "autoagenthire.db"
+_SQLITE_FALLBACK = f"sqlite:///{_DB_FILE.as_posix()}"
 
 
 import logging
@@ -108,6 +112,21 @@ engine, DATABASE_URL = _resolve_engine()
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+_tables_initialized = False
+
+def ensure_tables_exist():
+    """Ensure that all database tables exist before queries execute."""
+    global _tables_initialized
+    if not _tables_initialized:
+        try:
+            Base.metadata.create_all(bind=engine)
+            _tables_initialized = True
+        except Exception as e:
+            print(f"[DB] ensure_tables_exist notice: {e}")
+
+# Call immediately on engine initialization
+ensure_tables_exist()
+
 
 # Column migrations — ADD COLUMN IF NOT EXISTS is idempotent on PostgreSQL.
 # SQLite does not support IF NOT EXISTS on ALTER TABLE, so we catch and ignore errors there.
@@ -187,8 +206,10 @@ def _run_migrations():
 def init_db():
     """Initialize database tables — creates all tables if they don't exist."""
     try:
-        Path('./data').mkdir(parents=True, exist_ok=True)
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
         Base.metadata.create_all(bind=engine)
+        global _tables_initialized
+        _tables_initialized = True
         print("[DB] Tables created/verified successfully")
     except Exception as e:
         print("[DB] WARNING - Table initialization error: " + str(e))
@@ -216,20 +237,27 @@ def init_db():
                         JobApplication.__table__.create(bind=conn)
                         print("[DB] Migration: Re-created job_candidate_applications with nullable job_posting_id")
 
-            # Unescape any entity-encoded job descriptions
-            desc_rows = conn.execute(text("SELECT id, description FROM imported_job_listings WHERE description LIKE '%&lt;%' OR description LIKE '%&amp;%'")).fetchall()
-            for r_id, r_desc in desc_rows:
-                if r_desc:
-                    conn.execute(text("UPDATE imported_job_listings SET description = :desc WHERE id = :id"), {"desc": html.unescape(r_desc), "id": r_id})
-            if desc_rows:
-                print(f"[DB] Migration: Unescaped {len(desc_rows)} job descriptions in imported_job_listings")
+            # Check if imported_job_listings exists before querying
+            has_imported = False
+            if is_sqlite:
+                check_tbl = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='imported_job_listings'")).scalar()
+                has_imported = bool(check_tbl)
+            else:
+                has_imported = True
+
+            if has_imported:
+                desc_rows = conn.execute(text("SELECT id, description FROM imported_job_listings WHERE description LIKE '%&lt;%' OR description LIKE '%&amp;%'")).fetchall()
+                for r_id, r_desc in desc_rows:
+                    if r_desc:
+                        conn.execute(text("UPDATE imported_job_listings SET description = :desc WHERE id = :id"), {"desc": html.unescape(r_desc), "id": r_id})
+                if desc_rows:
+                    print(f"[DB] Migration: Unescaped {len(desc_rows)} job descriptions in imported_job_listings")
     except Exception as m_err:
         print(f"[DB] Post-init migration notice: {m_err}")
 
     # Seed system Authorizer account if not present
     try:
         from backend.auth.password import hash_password
-        from backend.database.models_complete import User
         with SessionLocal() as db:
             existing_auth = db.query(User).filter(
                 (User.custom_user_id == "AUTH-001") | (User.email.ilike("Author@auto.in")) | (User.email.ilike("Author@gmail.com"))
@@ -268,6 +296,7 @@ def drop_db():
 
 def get_db() -> Generator[Session, None, None]:
     """Get database session (dependency injection for FastAPI)"""
+    ensure_tables_exist()
     db = SessionLocal()
     try:
         yield db
@@ -278,6 +307,7 @@ def get_db() -> Generator[Session, None, None]:
 @contextmanager
 def get_db_session() -> Generator[Session, None, None]:
     """Context manager for database sessions"""
+    ensure_tables_exist()
     db = SessionLocal()
     try:
         yield db

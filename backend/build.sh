@@ -76,6 +76,19 @@ for s in site.getsitepackages():
         pass
 " 2>/dev/null || true
 
+echo "Initializing database schema and seed accounts..."
+python -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd()))
+try:
+    from backend.database.connection import init_db
+    init_db()
+    print('✓ Database schema and tables verified during build')
+except Exception as e:
+    print(f'Build-time database init notice: {e}')
+" || true
+
 echo "============================================================"
 echo "AutoAgentHire Build Completed Successfully!"
 

@@ -948,7 +948,15 @@ def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
             )
 
         # 3. Find or auto-register candidate user
-        user = UserRepository.get_by_email(db, email=google_email)
+        try:
+            user = UserRepository.get_by_email(db, email=google_email)
+        except Exception as query_exc:
+            if "no such table" in str(query_exc).lower():
+                from backend.database.connection import init_db
+                init_db()
+                user = UserRepository.get_by_email(db, email=google_email)
+            else:
+                raise
         if user is None:
             try:
                 random_pw = hash_password(_uuid.uuid4().hex + _uuid.uuid4().hex)
