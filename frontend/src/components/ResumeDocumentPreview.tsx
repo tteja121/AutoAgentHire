@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { API_BASE_URL } from '@/lib/api';
+import { API_BASE_URL, resolveApiUrl, getAuthenticatedFileUrl } from '@/lib/api';
 
 export interface ResumeDocumentPreviewProps {
   isOpen: boolean;
@@ -105,8 +105,7 @@ export function ResumeDocumentPreview({
 
         let fullUrl = fileUrl;
         if (!fileUrl.startsWith('http') && !fileUrl.startsWith('blob:')) {
-          const base = API_BASE_URL || '';
-          fullUrl = `${base.replace(/\/+$/, '')}/${fileUrl.replace(/^\/+/, '')}`;
+          fullUrl = resolveApiUrl(fileUrl);
         }
 
         const resp = await fetch(fullUrl, { headers });
@@ -193,14 +192,7 @@ export function ResumeDocumentPreview({
       a.click();
       document.body.removeChild(a);
     } else if (fileUrl) {
-      const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-      let fullUrl = fileUrl;
-      if (!fileUrl.startsWith('http')) {
-        fullUrl = `${API_BASE_URL.replace(/\/+$/, '')}/${fileUrl.replace(/^\/+/, '')}`;
-      }
-      if (token && !fullUrl.includes('token=')) {
-        fullUrl += `${fullUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
-      }
+      const fullUrl = getAuthenticatedFileUrl(fileUrl);
       window.open(fullUrl, '_blank');
     }
   };

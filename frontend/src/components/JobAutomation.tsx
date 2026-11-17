@@ -42,7 +42,7 @@ import {
   clearActiveResumeSession 
 } from '@/utils/activeResumeSession';
 import { applicationService } from '@/services/applicationService';
-import { API_BASE_URL, apiClient, API_ENDPOINTS } from '@/lib/api';
+import { API_BASE_URL, resolveApiUrl, apiClient, API_ENDPOINTS } from '@/lib/api';
 import { ResumeDocumentPreview } from '@/components/ResumeDocumentPreview';
 
 export interface MatchedJob {
@@ -653,7 +653,7 @@ export default function JobAutomation() {
           headers['Authorization'] = `Bearer ${token}`;
         }
 
-        const endpoint = API_BASE_URL ? `${API_BASE_URL}/api/ats/parse-resume` : '/api/ats/parse-resume';
+        const endpoint = resolveApiUrl('/api/ats/parse-resume');
         const response = await fetch(endpoint, {
           method: 'POST',
           headers,
@@ -759,7 +759,7 @@ export default function JobAutomation() {
           headers['Authorization'] = `Bearer ${token}`;
         }
 
-        const endpoint = API_BASE_URL ? `${API_BASE_URL}/api/ats/optimize-resume` : '/api/ats/optimize-resume';
+        const endpoint = resolveApiUrl('/api/ats/optimize-resume');
         const res = await fetch(endpoint, {
           method: 'POST',
           headers,

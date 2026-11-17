@@ -1,14 +1,33 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 
+export const PRODUCTION_BACKEND_URL = 'https://autoagenthire.onrender.com';
+export const LOCAL_BACKEND_URL = 'http://127.0.0.1:8000';
+
+/**
+ * Normalizes and sanitizes a base URL:
+ * - Trims whitespace and trailing slashes.
+ * - Strips redundant trailing `/api` segments so that both `/api/...` and `/auth/...`
+ *   routes can be appended without duplicate segments.
+ */
+function sanitizeBaseUrl(url: string): string {
+  if (!url) return '';
+  let clean = url.trim().replace(/\/+$/, '');
+  if (clean.toLowerCase().endsWith('/api')) {
+    clean = clean.slice(0, -4).replace(/\/+$/, '');
+  }
+  return clean;
+}
+
 /**
  * Production-safe API Base URL resolution:
  * - Reads VITE_API_URL or VITE_API_BASE_URL if configured.
- * - Runtime check: If running in a browser on a remote host (e.g. *.vercel.app, *.onrender.com),
- *   strictly disallows localhost/127.0.0.1 to prevent ERR_CONNECTION_REFUSED.
- * - In production mode (import.meta.env.PROD), similarly blocks localhost URLs.
- * - In both cases, falls back to relative routing '' so Vercel rewrites in vercel.json
- *   (or Vite dev proxy in local dev) handle the request seamlessly.
- * - In local dev with a running backend, VITE_API_URL is set to http://127.0.0.1:8000.
+ * - When running on a remote host (e.g. *.vercel.app, *.onrender.com):
+ *   - If envUrl is set to a valid remote URL, uses that.
+ *   - If envUrl is missing or points to localhost/127.0.0.1, automatically defaults
+ *     to the production Render backend (https://autoagenthire.onrender.com) so requests
+ *     never fail or fall back to broken local origins.
+ * - In local development (localhost / 127.0.0.1):
+ *   - Uses configured VITE_API_URL or defaults to http://127.0.0.1:8000.
  */
 export const getApiBaseUrl = (): string => {
   const envUrl = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '').trim();
@@ -18,27 +37,30 @@ export const getApiBaseUrl = (): string => {
     const hostname = window.location.hostname;
     const isLocalhostHost = hostname === 'localhost' || hostname === '127.0.0.1';
 
-    // If running on a remote host (e.g. Vercel, Render), NEVER call localhost
-    if (!isLocalhostHost && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
-      console.warn(`[API] Blocked localhost API URL on remote host (${hostname}). Falling back to relative routing.`);
-      return '';
+    // 1. If running on a remote host (e.g. Vercel, Render), route to production backend
+    if (!isLocalhostHost) {
+      if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+        return sanitizeBaseUrl(envUrl);
+      }
+      return PRODUCTION_BACKEND_URL;
     }
+
+    // 2. Running locally in browser (localhost / 127.0.0.1)
+    if (envUrl) {
+      return sanitizeBaseUrl(envUrl);
+    }
+    return LOCAL_BACKEND_URL;
   }
 
-  // If in production build mode, NEVER bake in localhost
-  if (import.meta.env.PROD && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
-    console.warn('[API] Localhost URL detected in production environment. Falling back to relative routing.');
-    return '';
+  // Build time / SSR mode
+  if (import.meta.env.PROD) {
+    if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+      return sanitizeBaseUrl(envUrl);
+    }
+    return PRODUCTION_BACKEND_URL;
   }
 
-  if (envUrl) {
-    const cleanUrl = envUrl.replace(/\/+$/, '');
-    // Prevent duplicate /api segments if user specified base ending with /api
-    return cleanUrl.endsWith('/api') ? cleanUrl.slice(0, -4) : cleanUrl;
-  }
-
-  // Relative routing by default
-  return '';
+  return sanitizeBaseUrl(envUrl) || LOCAL_BACKEND_URL;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -48,10 +70,14 @@ export const API_BASE_URL = getApiBaseUrl();
  * Normalizes slashes and prevents duplicate `/api` path segments.
  *
  * Examples:
- *   resolveApiUrl('/auth/google') => 'http://127.0.0.1:8000/auth/google'
- *   resolveApiUrl('/api/jobs')    => 'http://127.0.0.1:8000/api/jobs'
+ *   resolveApiUrl('/auth/google') => 'https://autoagenthire.onrender.com/auth/google'
+ *   resolveApiUrl('/api/jobs')    => 'https://autoagenthire.onrender.com/api/jobs'
  */
 export function resolveApiUrl(endpoint: string): string {
+  if (!endpoint) return '';
+  if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+    return endpoint;
+  }
   const base = getApiBaseUrl();
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   if (!base) {
@@ -69,9 +95,8 @@ export function getAuthenticatedFileUrl(rawUrl?: string): string {
   if (!rawUrl) return '';
   const token = localStorage.getItem('authToken');
   let fullUrl = rawUrl;
-  if (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')) {
-    const cleanPath = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
-    fullUrl = `${API_BASE_URL}${cleanPath}`;
+  if (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://') && !rawUrl.startsWith('blob:')) {
+    fullUrl = resolveApiUrl(rawUrl);
   }
   if (token && !fullUrl.includes('token=')) {
     fullUrl = `${fullUrl}${fullUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
@@ -151,9 +176,12 @@ export const apiClient = {
   },
 };
 
-// Request interceptor – attach auth token
+// Request interceptor – attach auth token and guarantee baseURL
 apiClient._axios.interceptors.request.use(
   (config) => {
+    if (!config.baseURL) {
+      config.baseURL = getApiBaseUrl();
+    }
     const rawToken = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token');
     const token = rawToken?.trim();
     if (token && token !== 'undefined' && token !== 'null') {
@@ -211,11 +239,12 @@ apiClient._axios.interceptors.response.use(
 
     // Enhance connection refused / offline network error messages
     if (!error.response) {
-      const isLocal = API_BASE_URL.includes('localhost') || API_BASE_URL.includes('127.0.0.1');
+      const activeBase = getApiBaseUrl();
+      const isLocal = activeBase.includes('localhost') || activeBase.includes('127.0.0.1');
       if (isLocal) {
-        error.message = `Unable to connect to local backend at ${API_BASE_URL}. Ensure the FastAPI server is running with: "python -m uvicorn backend.main:app --reload --port 8000".`;
-      } else if (!API_BASE_URL && typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-        error.message = 'Unable to connect to local backend on port 8000. Start it with: "python -m uvicorn backend.main:app --reload --port 8000".';
+        error.message = `Unable to connect to local backend at ${activeBase}. Ensure the FastAPI server is running with: "python -m uvicorn backend.main:app --reload --port 8000".`;
+      } else {
+        error.message = `Unable to connect to backend server at ${activeBase}. Please check service status or backend deployment.`;
       }
     }
 

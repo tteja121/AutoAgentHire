@@ -46,9 +46,16 @@ class UserRepository:
         try:
             db.commit()
             db.refresh(user)
-        except Exception:
+        except Exception as e:
             db.rollback()
-            raise
+            if "no such table" in str(e).lower():
+                from backend.database.connection import init_db
+                init_db()
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            else:
+                raise
 
         # Mirror immediately to MongoDB Atlas users collection
         try:
