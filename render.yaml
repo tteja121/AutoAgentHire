@@ -6,7 +6,7 @@ services:
     plan: free
     rootDir: .
     buildCommand: "bash ./build.sh"
-    startCommand: "python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+    startCommand: "python -m uvicorn main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
     envVars:
       - key: PYTHONUNBUFFERED
@@ -20,7 +20,7 @@ services:
       - key: API_RELOAD
         value: "false"
       - key: CORS_ORIGINS
-        value: "https://auto-agent-hire.vercel.app,http://localhost:5173"
+        value: "https://auto-agent-hire.vercel.app,https://autoagenthire-1.onrender.com,https://autoagenthire.onrender.com,http://localhost:5173"
       - key: DISABLE_LOCAL_VECTOR_STORE
         value: "true"
       - key: SKIP_PLAYWRIGHT_INSTALL

@@ -1,6 +1,6 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 
-export const PRODUCTION_BACKEND_URL = 'https://autoagenthire.onrender.com';
+export const PRODUCTION_BACKEND_URL = 'https://autoagenthire-1.onrender.com';
 export const LOCAL_BACKEND_URL = 'http://127.0.0.1:8000';
 
 /**

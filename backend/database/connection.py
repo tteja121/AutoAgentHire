@@ -89,6 +89,11 @@ def _resolve_engine():
     for key in ('SYNC_DATABASE_URL', 'DATABASE_URL'):
         val = os.getenv(key, '').strip()
         if val and val not in candidates:
+            # If candidate is a relative sqlite URL, normalize to canonical absolute DB file
+            if val.startswith("sqlite:///") and not val.startswith("sqlite:////") and ":memory:" not in val:
+                raw_path = val[len("sqlite:///"):]
+                if not Path(raw_path).is_absolute():
+                    val = _SQLITE_FALLBACK
             candidates.append(val)
     candidates.append(_SQLITE_FALLBACK)  # always have a last resort
 
@@ -119,10 +124,18 @@ def ensure_tables_exist():
     global _tables_initialized
     if not _tables_initialized:
         try:
-            Base.metadata.create_all(bind=engine)
+            from sqlalchemy import inspect
+            insp = inspect(engine)
+            if not insp.has_table("users"):
+                Base.metadata.create_all(bind=engine)
+                init_db()
             _tables_initialized = True
         except Exception as e:
-            print(f"[DB] ensure_tables_exist notice: {e}")
+            try:
+                Base.metadata.create_all(bind=engine)
+                _tables_initialized = True
+            except Exception as e2:
+                print(f"[DB] ensure_tables_exist notice: {e2}")
 
 # Call immediately on engine initialization
 ensure_tables_exist()

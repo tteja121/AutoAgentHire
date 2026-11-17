@@ -156,6 +156,7 @@ class UserRepository:
                     except Exception as db_err:
                         # If SQLite error occurs, ensure tables exist and retry
                         if "no such table" in str(db_err).lower():
+                            db.rollback()
                             from backend.database.connection import init_db
                             init_db()
                             return db.query(User).filter(func.lower(User.email) == clean_email).first()
@@ -167,6 +168,7 @@ class UserRepository:
             return db.query(User).filter(func.lower(User.email) == clean_email).first()
         except Exception as local_err:
             if "no such table" in str(local_err).lower():
+                db.rollback()
                 from backend.database.connection import init_db
                 init_db()
                 return db.query(User).filter(func.lower(User.email) == clean_email).first()
@@ -205,6 +207,7 @@ class UserRepository:
             return db.query(User).filter(User.uuid == identifier_clean).first()
         except Exception as id_err:
             if "no such table" in str(id_err).lower():
+                db.rollback()
                 from backend.database.connection import init_db
                 init_db()
                 return db.query(User).filter(User.email.ilike(identifier_clean)).first()

@@ -4,19 +4,19 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://autoagenthire.onrender.com/api/:path*"
+      "destination": "https://autoagenthire-1.onrender.com/api/:path*"
     },
     {
       "source": "/auth/:path*",
-      "destination": "https://autoagenthire.onrender.com/auth/:path*"
+      "destination": "https://autoagenthire-1.onrender.com/auth/:path*"
     },
     {
       "source": "/uploads/:path*",
-      "destination": "https://autoagenthire.onrender.com/uploads/:path*"
+      "destination": "https://autoagenthire-1.onrender.com/uploads/:path*"
     },
     {
       "source": "/health",
-      "destination": "https://autoagenthire.onrender.com/health"
+      "destination": "https://autoagenthire-1.onrender.com/health"
     },
     {
       "source": "/(.*)",

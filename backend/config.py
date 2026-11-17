@@ -240,7 +240,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = (
         "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,"
         "http://localhost:5173,http://localhost:8501,https://auto-agent-hire.vercel.app,"
-        "https://autoagenthire.vercel.app,https://autoagenthire.onrender.com"
+        "https://autoagenthire.vercel.app,https://autoagenthire-1.onrender.com,https://autoagenthire.onrender.com"
     )
     
     @property

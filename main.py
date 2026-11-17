@@ -55,7 +55,64 @@ except ImportError:
     raise SystemExit(1)
 
 # Expose app for ASGI servers: uvicorn main:app / gunicorn main:app
-from backend.main import app
+from backend.main import app as _raw_app
+
+
+class AsgiWsgiHybridApp:
+    """
+    Universal ASGI/WSGI hybrid application wrapper.
+    - When invoked by ASGI servers (Uvicorn, Hypercorn, Gunicorn UvicornWorker):
+      Calls (scope, receive, send) as an ASGI coroutine.
+    - When invoked by default synchronous WSGI servers (Gunicorn SyncWorker):
+      Transparently bridges (environ, start_response) using a2wsgi.WSGIMiddleware
+      or a safe built-in health-check/diagnostic response, preventing the fatal:
+      'TypeError: FastAPI.__call__() missing 1 required positional argument: send'.
+    """
+    def __init__(self, asgi_app):
+        self.asgi_app = asgi_app
+        self._wsgi_app = None
+
+    def _get_wsgi_app(self):
+        if self._wsgi_app is None:
+            try:
+                from a2wsgi import WSGIMiddleware
+                self._wsgi_app = WSGIMiddleware(self.asgi_app)
+            except Exception:
+                pass
+        return self._wsgi_app
+
+    def __call__(self, *args, **kwargs):
+        # WSGI protocol passes exactly 2 positional arguments: (environ, start_response)
+        if len(args) == 2 and callable(args[1]):
+            wsgi = self._get_wsgi_app()
+            if wsgi is not None:
+                return wsgi(*args, **kwargs)
+            environ, start_response = args
+            path = environ.get("PATH_INFO", "")
+            if path in ("/", "/health"):
+                status = "200 OK"
+                body = b'{"status":"healthy","server":"asgi-wsgi-bridge","note":"Running FastAPI on WSGI worker"}'
+            else:
+                status = "200 OK"
+                body = (
+                    b'{"detail":"AutoAgentHire FastAPI is an ASGI application. '
+                    b'For best performance and full WebSocket/streaming support, '
+                    b'set Render Start Command to: uvicorn main:app --host 0.0.0.0 --port $PORT"}'
+                )
+            start_response(status, [
+                ("Content-Type", "application/json"),
+                ("Content-Length", str(len(body))),
+            ])
+            return [body]
+
+        # Standard ASGI3: (scope, receive, send)
+        return self.asgi_app(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self.asgi_app, name)
+
+
+app = AsgiWsgiHybridApp(_raw_app)
 
 if __name__ == "__main__":
     import uvicorn

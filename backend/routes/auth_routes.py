@@ -952,6 +952,7 @@ def google_auth(body: GoogleAuthRequest, db: Session = Depends(get_db)):
             user = UserRepository.get_by_email(db, email=google_email)
         except Exception as query_exc:
             if "no such table" in str(query_exc).lower():
+                db.rollback()
                 from backend.database.connection import init_db
                 init_db()
                 user = UserRepository.get_by_email(db, email=google_email)
