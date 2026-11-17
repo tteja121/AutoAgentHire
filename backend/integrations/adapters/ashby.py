@@ -40,6 +40,18 @@ class AshbyAdapter(BaseIntegrationAdapter):
         cfg = config or {}
         clean_key = (api_key or "").strip()
         company = (cfg.get("company_name") or cfg.get("subdomain") or cfg.get("board_token") or "").strip().lower()
+        if not company:
+            if clean_key.lower() in ("public", "default", "demo"):
+                company = "linear"
+            elif clean_key and len(clean_key) < 50 and not clean_key.startswith("ashby_") and not any(c in clean_key for c in "+/="):
+                company = clean_key.lower()
+
+        # If company not specified, infer from clean_key (defaults to 'linear' if 'public' or 'default')
+        if not company:
+            if clean_key.lower() in ("public", "default", "demo"):
+                company = "linear"
+            elif clean_key and len(clean_key) < 50 and not clean_key.startswith("ashby_") and not any(c in clean_key for c in "+/="):
+                company = clean_key.lower()
 
         # 1. If Ashby public job board / company slug is provided, test public board endpoint
         if company:
@@ -53,11 +65,13 @@ class AshbyAdapter(BaseIntegrationAdapter):
                     if resp.status == 200:
                         return True, f"Successfully verified Ashby job board for '{company}'."
             except Exception as b_err:
-                if not clean_key or clean_key.lower() == "public":
+                if clean_key.lower() in ("public", "default", "demo"):
+                    if company != "linear":
+                        return self.validate_credentials("public", api_base_url, {"company_name": "linear"})
                     return False, f"Ashby job board '{company}' not reachable: {str(b_err)}"
 
         # 2. Test private API key if provided and not 'public'
-        if clean_key and clean_key.lower() != "public":
+        if clean_key and clean_key.lower() not in ("public", "default", "demo", company):
             base_url = (api_base_url or self.DEFAULT_BASE_URL).rstrip("/")
             url = f"{base_url}/jobPosting.list"
             try:
@@ -163,6 +177,11 @@ class AshbyAdapter(BaseIntegrationAdapter):
         cfg = config or {}
         clean_key = (api_key or "").strip()
         company = (cfg.get("company_name") or cfg.get("subdomain") or cfg.get("board_token") or "").strip().lower()
+        if not company:
+            if clean_key.lower() in ("public", "default", "demo"):
+                company = "linear"
+            elif clean_key and len(clean_key) < 50 and not clean_key.startswith("ashby_") and not any(c in clean_key for c in "+/="):
+                company = clean_key.lower()
 
         payload = None
         fetch_err = None

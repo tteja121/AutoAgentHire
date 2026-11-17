@@ -4875,21 +4875,21 @@ export default function AuthorizerPortal() {
             {addIntegrationForm.provider === "greenhouse" && (
               <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-muted-foreground">
                 <span className="font-semibold text-emerald-300 block mb-0.5">Greenhouse Configuration:</span>
-                Create a Harvest API key in Greenhouse Configure &gt; Dev Center &gt; API Credential Management with read permissions for Candidates and Applications.
+                Enter your private Harvest API key, or enter <code className="text-emerald-300 font-bold bg-emerald-950/60 px-1 py-0.5 rounded">public</code> (or company slug like <code className="text-emerald-300 font-bold bg-emerald-950/60 px-1 py-0.5 rounded">stripe</code>) to connect via the public job board.
               </div>
             )}
 
             {addIntegrationForm.provider === "lever" && (
               <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-muted-foreground">
                 <span className="font-semibold text-emerald-300 block mb-0.5">Lever Configuration:</span>
-                Generate an API key in Lever Settings &gt; Integrations &amp; API &gt; Partner API. Read permissions for Postings and Opportunities are required.
+                Enter your private Partner API key, or enter <code className="text-emerald-300 font-bold bg-emerald-950/60 px-1 py-0.5 rounded">public</code> (or company slug like <code className="text-emerald-300 font-bold bg-emerald-950/60 px-1 py-0.5 rounded">leverdemo</code>) to connect via the public postings API.
               </div>
             )}
 
             {addIntegrationForm.provider === "ashby" && (
               <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-muted-foreground">
                 <span className="font-semibold text-emerald-300 block mb-0.5">Ashby Configuration:</span>
-                Create an API secret key in Ashby Admin &gt; Ashby API. Read permissions for Job Postings and Applications are required.
+                Enter your private Ashby API key, or enter <code className="text-emerald-300 font-bold bg-emerald-950/60 px-1 py-0.5 rounded">public</code> (or company slug like <code className="text-emerald-300 font-bold bg-emerald-950/60 px-1 py-0.5 rounded">linear</code>) to connect via the public job board.
               </div>
             )}
 
@@ -4927,7 +4927,7 @@ export default function AuthorizerPortal() {
               <Label className="text-xs font-semibold uppercase text-muted-foreground">API Key / Access Token / Secret *</Label>
               <Input
                 type="password"
-                placeholder="Paste API credential key..."
+                placeholder="API key or company slug (e.g. 'public', 'leverdemo')..."
                 value={addIntegrationForm.api_key}
                 onChange={(e) => setAddIntegrationForm({ ...addIntegrationForm, api_key: e.target.value })}
                 className="mt-1 text-xs font-mono"

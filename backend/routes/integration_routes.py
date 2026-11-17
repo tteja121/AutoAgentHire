@@ -188,13 +188,24 @@ def create_integration(
     encrypted_key = encrypt_credential(body.api_key)
 
     # 3. Persistence bound strictly to current_user.id
+    integ_config = dict(body.config or {})
+    clean_k = (body.api_key or "").strip().lower()
+    if adapter.provider_id == "lever" and not integ_config.get("company_name"):
+        integ_config["company_name"] = "leverdemo" if clean_k in ("public", "default", "demo") else clean_k
+    elif adapter.provider_id == "greenhouse" and not integ_config.get("board_token"):
+        integ_config["board_token"] = "stripe" if clean_k in ("public", "default", "demo") else clean_k
+        integ_config.setdefault("company_name", "Stripe")
+    elif adapter.provider_id == "ashby" and not integ_config.get("company_name"):
+        integ_config["company_name"] = "linear" if clean_k in ("public", "default", "demo") else clean_k
+        integ_config.setdefault("board_token", "linear")
+
     new_integ = PortalIntegration(
         user_id=current_user.id,
         provider=adapter.provider_id,
         name=body.name.strip(),
         api_base_url=body.api_base_url.strip() if body.api_base_url else None,
         encrypted_api_key=encrypted_key,
-        config=body.config or {},
+        config=integ_config,
         status="connected",
         imported_count=0,
     )

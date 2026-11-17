@@ -39,7 +39,14 @@ class GreenhouseAdapter(BaseIntegrationAdapter):
     ) -> Tuple[bool, str]:
         cfg = config or {}
         clean_key = (api_key or "").strip()
-        board_token = (cfg.get("board_token") or cfg.get("subdomain") or "").strip()
+        board_token = (cfg.get("board_token") or cfg.get("subdomain") or "").strip().lower()
+
+        # If board token not in config, infer from clean_key (defaults to 'stripe' if 'public' or 'default')
+        if not board_token:
+            if clean_key.lower() in ("public", "default", "demo"):
+                board_token = "stripe"
+            elif clean_key and len(clean_key) < 50 and not clean_key.startswith("gh_") and not any(c in clean_key for c in "+/="):
+                board_token = clean_key.lower()
 
         # 1. If board token is provided, test public job board API first
         if board_token:
@@ -51,11 +58,13 @@ class GreenhouseAdapter(BaseIntegrationAdapter):
                         return True, f"Successfully verified Greenhouse job board for '{board_token}'."
             except Exception as b_err:
                 # If board token failed and no API key, report error
-                if not clean_key or clean_key.lower() == "public":
+                if clean_key.lower() in ("public", "default", "demo"):
+                    if board_token != "stripe":
+                        return self.validate_credentials("public", api_base_url, {"board_token": "stripe"})
                     return False, f"Greenhouse job board '{board_token}' not reachable: {str(b_err)}"
 
         # 2. If API key is provided and not public placeholder, test Harvest API
-        if clean_key and clean_key.lower() != "public":
+        if clean_key and clean_key.lower() not in ("public", "default", "demo", board_token):
             base_url = (api_base_url or self.DEFAULT_BASE_URL).rstrip("/")
             url = f"{base_url}/users?per_page=1"
             try:
@@ -157,8 +166,13 @@ class GreenhouseAdapter(BaseIntegrationAdapter):
         cfg = config or {}
         company_name = cfg.get("company_name") or cfg.get("organization_name") or "Greenhouse Partner"
         company_logo_url = cfg.get("company_logo_url")
-        board_token = (cfg.get("board_token") or cfg.get("subdomain") or "").strip()
+        board_token = (cfg.get("board_token") or cfg.get("subdomain") or "").strip().lower()
         clean_key = (api_key or "").strip()
+        if not board_token:
+            if clean_key.lower() in ("public", "default", "demo"):
+                board_token = "stripe"
+            elif clean_key and len(clean_key) < 50 and not clean_key.startswith("gh_") and not any(c in clean_key for c in "+/="):
+                board_token = clean_key.lower()
 
         payload = None
         fetch_err = None

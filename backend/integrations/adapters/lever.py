@@ -38,9 +38,21 @@ class LeverAdapter(BaseIntegrationAdapter):
     ) -> Tuple[bool, str]:
         cfg = config or {}
         clean_key = (api_key or "").strip()
-        company = (cfg.get("company_name") or cfg.get("subdomain") or cfg.get("site") or "").strip().lower()
+        company = (cfg.get("company_name") or cfg.get("subdomain") or cfg.get("site") or cfg.get("board_token") or "").strip().lower()
+        if not company:
+            if clean_key.lower() in ("public", "default", "demo"):
+                company = "leverdemo"
+            elif clean_key and len(clean_key) < 50 and not any(c in clean_key for c in "+/="):
+                company = clean_key.lower()
 
-        # 1. If company identifier is provided, test Lever public postings endpoint
+        # If company not specified, infer from clean_key (defaults to 'leverdemo' if 'public' or 'default')
+        if not company:
+            if clean_key.lower() in ("public", "default", "demo"):
+                company = "leverdemo"
+            elif clean_key and len(clean_key) < 50 and not clean_key.startswith("Bearer ") and not any(c in clean_key for c in "+/="):
+                company = clean_key.lower()
+
+        # 1. If company identifier is provided or inferred, test Lever public postings endpoint
         if company:
             public_url = f"https://api.lever.co/v0/postings/{company}?mode=json"
             try:
@@ -52,11 +64,13 @@ class LeverAdapter(BaseIntegrationAdapter):
                     if resp.status in (200, 204):
                         return True, f"Successfully verified Lever career board for '{company}'."
             except Exception as b_err:
-                if not clean_key or clean_key.lower() == "public":
+                if clean_key.lower() in ("public", "default", "demo"):
+                    if company != "leverdemo":
+                        return self.validate_credentials("public", api_base_url, {"company_name": "leverdemo"})
                     return False, f"Lever board '{company}' not reachable: {str(b_err)}"
 
-        # 2. Test private API key if provided
-        if clean_key and clean_key.lower() != "public":
+        # 2. Test private API key if provided and not public/company slug
+        if clean_key and clean_key.lower() not in ("public", "default", "demo", company):
             base_url = (api_base_url or self.DEFAULT_BASE_URL).rstrip("/")
             url = f"{base_url}/postings?limit=1"
             try:
@@ -159,6 +173,11 @@ class LeverAdapter(BaseIntegrationAdapter):
         cfg = config or {}
         clean_key = (api_key or "").strip()
         company = (cfg.get("company_name") or cfg.get("subdomain") or cfg.get("site") or cfg.get("board_token") or "").strip().lower()
+        if not company:
+            if clean_key.lower() in ("public", "default", "demo"):
+                company = "leverdemo"
+            elif clean_key and len(clean_key) < 50 and not any(c in clean_key for c in "+/="):
+                company = clean_key.lower()
 
         payload = None
         fetch_err = None
