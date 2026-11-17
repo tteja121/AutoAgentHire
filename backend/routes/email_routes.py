@@ -144,7 +144,17 @@ async def receive_inbound_email(
             subject = str(form.get("subject") or "")
             body_text = str(form.get("text") or "")
             body_html = str(form.get("html") or "")
-            message_id = str(form.get("Message-ID") or form.get("headers", {}).get("Message-ID") or "")
+            headers_val = form.get("headers")
+            headers_msg_id = ""
+            if isinstance(headers_val, dict):
+                headers_msg_id = str(headers_val.get("Message-ID") or headers_val.get("message-id") or "")
+            elif isinstance(headers_val, str) and "message-id:" in headers_val.lower():
+                m = re.search(r'message-id:\s*<?([^>\r\n]+)>?', headers_val, re.IGNORECASE)
+                if m:
+                    headers_msg_id = m.group(1).strip()
+
+            raw_msg_id = form.get("Message-ID") or form.get("message_id") or headers_msg_id or ""
+            message_id = str(raw_msg_id)
         except Exception as e:
             logger.warning("[EmailInbound] Form parse failed: %s", e)
 
